@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="inbox-header">
+    <h1>Inbox</h1>
+    <form hx-post="/inbox/sync" hx-indicator="#sync-spinner" hx-target="#sync-status" hx-swap="innerHTML">
+        <button type="submit" class="btn btn-primary">
+            <span class="sync-button-text">Sync Now</span>
+            <span id="sync-spinner" class="htmx-indicator"><span class="spinner"></span></span>
+        </button>
+    </form>
+</div>
+
+<div id="sync-status"></div>
+
+<!-- Account Filters -->
+{% if accounts %}
+<div class="filter-row">
+    <div class="filter-chips">
+        <a href="/" class="chip {% if not selected_account_id %}active{% endif %}">All</a>
+        {% for account in accounts %}
+        <a href="/?account_id={{ account.id }}{% if selected_priority %}&priority={{ selected_priority }}{% endif %}"
+           class="chip {% if selected_account_id == account.id %}active{% endif %}">
+            <span class="account-dot" style="background-color: {{ account.color }};"></span>
+            {{ account.display_name or account.email.split('@')[0] }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Priority Filters -->
+<div class="filter-row">
+    <div class="filter-chips">
+        <a href="/{% if selected_account_id %}?account_id={{ selected_account_id }}{% endif %}"
+           class="chip {% if not selected_priority %}active{% endif %}">All Priorities</a>
+        {% for tier in priority_tiers %}
+        <a href="/?priority={{ tier }}{% if selected_account_id %}&account_id={{ selected_account_id }}{% endif %}"
+           class="chip tier-{{ tier }} {% if selected_priority == tier %}active{% endif %}">
+            {{ tier }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Email List -->
+<div id="email-list">
+    {% if emails %}
+        {% for email in emails %}
+            {% include "partials/email_card.html" %}
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            {% if not accounts %}
+            <div class="empty-state-icon">&#9993;</div>
+            <h3>No accounts connected</h3>
+            <p>Connect a Gmail account in <a href="/settings">Settings</a> to start triaging your inbox.</p>
+            {% elif selected_account_id or selected_priority %}
+            <div class="empty-state-icon">&#128269;</div>
+            <h3>No matching emails</h3>
+            <p>No emails match this filter. Try adjusting your selection or <a href="/">clear filters</a>.</p>
+            {% else %}
+            <div class="empty-state-icon">&#128229;</div>
+            <h3>Inbox empty</h3>
+            <p>Nothing synced yet. Click <strong>Sync Now</strong> above to fetch your emails.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+<!-- Skeleton loader (shown during HTMX requests) -->
+<template id="skeleton-template">
+    <div class="skeleton-card">
+        <div class="skeleton-line w-1\/3 h-2" style="margin-bottom: 0.75rem;"></div>
+        <div class="skeleton-line w-3\/4 h-4"></div>
+        <div class="skeleton-line w-full"></div>
+        <div class="skeleton-line w-1\/2"></div>
+        <div style="display: flex; gap: 0.375rem; margin-top: 0.5rem;">
+            <div class="skeleton-line" style="width: 60px; height: 18px; border-radius: 4px;"></div>
+            <div class="skeleton-line" style="width: 80px; height: 18px; border-radius: 4px;"></div>
+        </div>
+    </div>
+    <div class="skeleton-card">
+        <div class="skeleton-line w-1\/4 h-2" style="margin-bottom: 0.75rem;"></div>
+        <div class="skeleton-line w-1\/2 h-4"></div>
+        <div class="skeleton-line w-3\/4"></div>
+        <div class="skeleton-line w-1\/3"></div>
+    </div>
+    <div class="skeleton-card">
+        <div class="skeleton-line w-1\/3 h-2" style="margin-bottom: 0.75rem;"></div>
+        <div class="skeleton-line w-2\/3 h-4"></div>
+        <div class="skeleton-line w-full"></div>
+        <div class="skeleton-line w-1\/2"></div>
+    </div>
+</template>
+{% endblock %}

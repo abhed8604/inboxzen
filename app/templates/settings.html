@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">Settings</h1>
+
+<div class="settings-grid">
+    <!-- Ollama Model Configuration — Full width primary section -->
+    <div class="settings-section">
+        <h2>AI Triage Model</h2>
+        <p>Select which Ollama model to use for email triage. Make sure Ollama is running locally.</p>
+
+        <form hx-post="/settings/model" hx-target="#model-status" hx-swap="innerHTML">
+            <div class="form-group">
+                <label for="model">Model Name</label>
+                {% if available_models %}
+                <select id="model" name="model">
+                    <option value="">Select a model...</option>
+                    {% for model in available_models %}
+                    <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>
+                        {{ model }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" id="model" name="model" value="{{ selected_model }}"
+                       placeholder="Enter model name (e.g., llama3.2)">
+                <small>Could not connect to Ollama. Make sure it's running at {{ ollama_host or 'localhost:11434' }}</small>
+                {% endif %}
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save Model</button>
+        </form>
+
+        <div id="model-status"></div>
+    </div>
+
+    <!-- Poll Interval Configuration — Left column -->
+    <div class="settings-section">
+        <h2>Sync Interval</h2>
+        <p>How often to check for new emails (in minutes).</p>
+
+        <form hx-post="/settings/poll-interval" hx-target="#interval-status" hx-swap="innerHTML">
+            <div class="form-group">
+                <label for="interval">Poll Interval (minutes)</label>
+                <input type="number" id="interval" name="interval" value="{{ poll_interval }}"
+                       min="1" max="60" step="1">
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save Interval</button>
+        </form>
+
+        <div id="interval-status"></div>
+    </div>
+
+    <!-- Triage Guidelines — Right column -->
+    <div class="settings-section">
+        <h2>Triage Guidelines</h2>
+        <p>How emails are categorized by priority:</p>
+
+        <ul class="triage-list">
+            <li>
+                <span class="tier-dot tier-CRITICAL"></span>
+                <strong>CRITICAL:</strong> Urgent/time-sensitive, job offers, bank/security alerts
+            </li>
+            <li>
+                <span class="tier-dot tier-HIGH"></span>
+                <strong>HIGH:</strong> Important but not urgent, meetings, deadlines
+            </li>
+            <li>
+                <span class="tier-dot tier-MEDIUM"></span>
+                <strong>MEDIUM:</strong> Normal correspondence, updates, notifications
+            </li>
+            <li>
+                <span class="tier-dot tier-LOW"></span>
+                <strong>LOW:</strong> Newsletters, promotions, automated notifications
+            </li>
+        </ul>
+    </div>
+
+    <!-- Connected Accounts — Full width -->
+    <div class="settings-section">
+        <h2>Connected Accounts</h2>
+        <p>Manage your connected Gmail accounts.</p>
+
+        {% if accounts %}
+        <div class="account-list">
+            {% for account in accounts %}
+            <div class="account-item">
+                <div class="account-info">
+                    <div class="account-indicator" style="background-color: {{ account.color }};"></div>
+                    <div class="account-details">
+                        <div class="account-name">{{ account.display_name or account.email.split('@')[0] }}</div>
+                        <div class="account-email">{{ account.email }}</div>
+                    </div>
+                </div>
+
+                <button class="btn btn-danger"
+                        hx-delete="/accounts/{{ account.id }}"
+                        hx-confirm="Disconnect this account? This will remove all synced emails."
+                        hx-target="closest .account-item"
+                        hx-swap="outerHTML">
+                    Disconnect
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: 1.5rem;">
+            <p>No accounts connected yet.</p>
+        </div>
+        {% endif %}
+
+        <div style="margin-top: 1rem;">
+            <a href="/accounts/connect" class="btn btn-primary">Connect Another Account</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

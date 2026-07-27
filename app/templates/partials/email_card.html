@@ -1,0 +1,54 @@
+<div class="email-card priority-{{ email.priority or 'LOW' }}{% if email.is_read %} is-read{% endif %}">
+    {% if email.priority %}
+    <span class="priority-badge priority-{{ email.priority }}">{{ email.priority }}</span>
+    {% endif %}
+
+    <div class="account-indicator" style="background-color: {{ email.account.color }};"></div>
+
+    <div class="email-content">
+        <div class="email-header">
+            <span class="email-sender">
+                {{ email.sender.split('<')[0].strip() if '<' in email.sender else email.sender }}
+                {% if '<' in email.sender %}
+                <span class="email-sender-email">&lt;{{ email.sender.split('<')[1].split('>')[0] }}&gt;</span>
+                {% endif %}
+            </span>
+            <span class="email-time">{{ email.received_at.strftime('%b %d, %I:%M %p') if email.received_at else 'Unknown' }}</span>
+        </div>
+
+        <div class="email-subject">{{ email.subject }}</div>
+
+        {% if email.snippet %}
+        <div class="email-snippet">{{ email.snippet[:200] }}{% if email.snippet|length > 200 %}...{% endif %}</div>
+        {% endif %}
+
+        {% if email.summary %}
+        <div class="email-summary">{{ email.summary }}</div>
+        {% endif %}
+
+        <div class="email-meta">
+            {% if email.category %}
+            <span class="badge category-badge">{{ email.category }}</span>
+            {% endif %}
+        </div>
+
+        <div class="email-actions">
+            {% if not email.is_read %}
+            <button class="action-btn"
+                    hx-post="/inbox/{{ email.id }}/read"
+                    hx-target="closest .email-card"
+                    hx-swap="outerHTML">
+                &#10003; Mark Read
+            </button>
+            {% endif %}
+
+            <button class="action-btn action-archive"
+                    hx-post="/inbox/{{ email.id }}/archive"
+                    hx-target="closest .email-card"
+                    hx-swap="outerHTML"
+                    hx-confirm="Archive this email?">
+                &#8676; Archive
+            </button>
+        </div>
+    </div>
+</div>

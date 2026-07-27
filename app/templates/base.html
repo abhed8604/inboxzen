@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InboxZen - AI Email Triage</title>
+
+    <!-- Theme: apply before paint to prevent flash -->
+    <script>
+        (function() {
+            var saved = localStorage.getItem('theme');
+            if (saved) {
+                document.documentElement.setAttribute('data-theme', saved);
+            } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
+
+    <!-- External stylesheet -->
+    <link rel="stylesheet" href="/static/style.css">
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    <!-- HTMX WebSocket Extension -->
+    <script src="https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <a href="/" class="logo" style="text-decoration:none">InboxZen</a>
+            <nav class="nav-links">
+                <a href="/">Inbox</a>
+                <a href="/settings">Settings</a>
+            </nav>
+            <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+                <span id="theme-icon">&#9790;</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        function toggleTheme() {
+            var html = document.documentElement;
+            var current = html.getAttribute('data-theme');
+            var next = current === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            document.getElementById('theme-icon').innerHTML = next === 'dark' ? '&#9788;' : '&#9790;';
+        }
+
+        // Set correct icon on load
+        document.addEventListener('DOMContentLoaded', function() {
+            var theme = document.documentElement.getAttribute('data-theme');
+            document.getElementById('theme-icon').innerHTML = theme === 'dark' ? '&#9788;' : '&#9790;';
+        });
+
+        // WebSocket connection for live updates
+        document.addEventListener('DOMContentLoaded', function() {
+            var ws = new WebSocket('ws://' + window.location.host + '/ws');
+
+            ws.onmessage = function(event) {
+                var data = JSON.parse(event.data);
+                if (data.type === 'email_triaged') {
+                    location.reload();
+                }
+            };
+
+            ws.onclose = function() {
+                setTimeout(function() {
+                    location.reload();
+                }, 5000);
+            };
+        });
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
