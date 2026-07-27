@@ -1,80 +1,144 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>InboxZen - AI Email Triage</title>
 
-    <!-- Theme: apply before paint to prevent flash -->
-    <script>
-        (function() {
-            var saved = localStorage.getItem('theme');
-            if (saved) {
-                document.documentElement.setAttribute('data-theme', saved);
-            } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                document.documentElement.setAttribute('data-theme', 'dark');
-            }
-        })();
-    </script>
-
-    <!-- External stylesheet -->
     <link rel="stylesheet" href="/static/style.css">
-
-    <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-
-    <!-- HTMX WebSocket Extension -->
     <script src="https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"></script>
 </head>
 <body>
-    <header>
-        <div class="header-content">
-            <a href="/" class="logo" style="text-decoration:none">InboxZen</a>
-            <nav class="nav-links">
-                <a href="/">Inbox</a>
-                <a href="/settings">Settings</a>
-            </nav>
-            <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
-                <span id="theme-icon">&#9790;</span>
-            </button>
-        </div>
-    </header>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-mark">Z</div>
+                <div class="logo-text">
+                    <span class="logo-name">InboxZen</span>
+                    <span class="logo-tagline">One inbox. Zero noise.</span>
+                </div>
+            </div>
 
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-item active">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+                    <span>Inbox</span>
+                    {% if unread_count is defined and unread_count > 0 %}
+                    <span class="nav-badge">{{ unread_count }}</span>
+                    {% endif %}
+                </a>
+                <a href="#" class="nav-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>Focus</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span>Digest</span>
+                </a>
+                <a href="/settings" class="nav-item">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span>Settings</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-section">
+                <div class="section-label">MAILBOXES</div>
+                <a href="/" class="mailbox-item {% if not selected_account_id %}active{% endif %}">
+                    <span class="mailbox-dot" style="background-color: #7c5bf5;"></span>
+                    <span>All inboxes</span>
+                    <span class="mailbox-count">{{ total_count if total_count is defined else 0 }}</span>
+                </a>
+                {% if accounts is defined %}
+                {% for account in accounts %}
+                <a href="/?account_id={{ account.id }}" class="mailbox-item {% if selected_account_id == account.id %}active{% endif %}">
+                    <span class="mailbox-dot" style="background-color: {{ account.color }};"></span>
+                    <span>{{ account.display_name or account.email.split('@')[0] }}</span>
+                    <span class="mailbox-count">-</span>
+                </a>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="ollama-status">
+                    <span class="status-dot online"></span>
+                    <span>Ollama online</span>
+                    <span class="footer-sep">·</span>
+                    <span>llama3.1:8b</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Email List Panel -->
+        <div class="email-list-panel">
+            <div class="list-header">
+                <div class="search-bar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" placeholder="Search everything..." id="search-input">
+                    <kbd>Ctrl K</kbd>
+                </div>
+            </div>
+
+            <div class="list-actions">
+                <button class="compose-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    Compose
+                </button>
+            </div>
+
+            <div class="filter-chips">
+                <a href="/" class="chip {% if not selected_priority %}active{% endif %}">All</a>
+                <a href="/?priority=HIGH{% if selected_account_id %}&account_id={{ selected_account_id }}{% endif %}" class="chip {% if selected_priority == 'HIGH' %}active{% endif %}">High {{ high_count if high_count is defined else '' }}</a>
+                <a href="/?priority=MEDIUM{% if selected_account_id %}&account_id={{ selected_account_id }}{% endif %}" class="chip {% if selected_priority == 'MEDIUM' %}active{% endif %}">Medium {{ medium_count if medium_count is defined else '' }}</a>
+                <a href="/" class="chip">Unread {{ unread_count if unread_count is defined else '' }}</a>
+            </div>
+
+            <div class="list-filter">
+                <input type="text" placeholder="Filter this view..." id="filter-input">
+            </div>
+
+            <div class="email-list" id="email-list">
+                {% if emails is defined %}
+                {% for email in emails %}
+                {% include "partials/email_card.html" %}
+                {% endfor %}
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Email Detail Panel -->
+        <div class="email-detail-panel" id="detail-panel">
+            {% block detail_panel %}
+            {% if selected_email is defined and selected_email %}
+                {% include "partials/email_detail.html" with context %}
+            {% else %}
+            <div class="empty-detail">
+                <div class="empty-detail-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                </div>
+                <p>Select an email to read</p>
+            </div>
+            {% endif %}
+            {% endblock %}
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
 
     <script>
-        function toggleTheme() {
-            var html = document.documentElement;
-            var current = html.getAttribute('data-theme');
-            var next = current === 'dark' ? 'light' : 'dark';
-            html.setAttribute('data-theme', next);
-            localStorage.setItem('theme', next);
-            document.getElementById('theme-icon').innerHTML = next === 'dark' ? '&#9788;' : '&#9790;';
-        }
-
-        // Set correct icon on load
-        document.addEventListener('DOMContentLoaded', function() {
-            var theme = document.documentElement.getAttribute('data-theme');
-            document.getElementById('theme-icon').innerHTML = theme === 'dark' ? '&#9788;' : '&#9790;';
-        });
-
         // WebSocket connection for live updates
         document.addEventListener('DOMContentLoaded', function() {
             var ws = new WebSocket('ws://' + window.location.host + '/ws');
-
             ws.onmessage = function(event) {
                 var data = JSON.parse(event.data);
                 if (data.type === 'email_triaged') {
                     location.reload();
                 }
             };
-
             ws.onclose = function() {
-                setTimeout(function() {
-                    location.reload();
-                }, 5000);
+                setTimeout(function() { location.reload(); }, 5000);
             };
         });
     </script>
