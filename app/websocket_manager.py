@@ -1,9 +1,9 @@
+from __future__ import annotations
 from fastapi import WebSocket
-from typing import List, Dict, Any
 
 class WebSocketManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
     
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -13,7 +13,7 @@ class WebSocketManager:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
     
-    async def broadcast(self, data: Dict[str, Any]):
+    async def broadcast(self, data: dict):
         for connection in self.active_connections:
             try:
                 await connection.send_json(data)
@@ -26,5 +26,5 @@ class WebSocketManager:
 manager = WebSocketManager()
 
 # Convenience function for broadcasting
-async def broadcast(data: Dict[str, Any]):
+async def broadcast(data: dict):
     await manager.broadcast(data)

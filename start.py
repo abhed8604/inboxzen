@@ -69,7 +69,11 @@ def check_env_file():
 
 def check_ollama():
     """Check if Ollama is running"""
-    import httpx
+    try:
+        import httpx
+    except ImportError:
+        print("⚠ httpx not installed yet, skipping Ollama check")
+        return False
     ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     try:
         response = httpx.get(f"{ollama_host}/api/tags", timeout=5.0)

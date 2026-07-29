@@ -1,29 +1,46 @@
-{% set initials = get_initials(email.sender) if get_initials is defined else '?' %}
 {% set time_ago = get_time_ago(email.received_at) if get_time_ago is defined else '' %}
+{% set score = email.relevance_score|int if email.relevance_score is defined and email.relevance_score is not none else 0 %}
+{% set is_unread = not email.is_read %}
+{% set sender_name = email.sender.split('<')[0].strip() if '<' in email.sender else email.sender %}
 
-<div class="email-card {% if email.priority %}priority-{{ email.priority }}{% endif %} {% if email.is_read %}is-read{% endif %}"
+{# Score ring color tiers #}
+{% if score >= 90 %}
+  {% set ring_color = '#4fd18b' %}
+{% elif score >= 70 %}
+  {% set ring_color = '#e8c34c' %}
+{% else %}
+  {% set ring_color = '#9a9aa4' %}
+{% endif %}
+
+{# Score ring SVG math: size=38, stroke=4, radius = (38/2) - (4/2) - 1 = 14 #}
+{% set ring_r = 14 %}
+{% set ring_circumf = (2 * 3.14159265 * ring_r)|round(4) %}
+{% set ring_offset = (ring_circumf * (1 - score / 100))|round(4) %}
+
+<div class="email-card {% if is_unread %}is-unread{% else %}read{% endif %} {% if selected_email is defined and selected_email and selected_email.id == email.id %}selected{% endif %}"
+     style="--accent: {{ email.account.color if email.account else 'var(--text-muted)' }}"
      data-email-id="{{ email.id }}"
      onclick="selectEmail({{ email.id }})"
      hx-get="/inbox/{{ email.id }}"
      hx-target="#detail-panel"
      hx-swap="innerHTML">
-    <div class="card-avatar" style="background-color: {{ email.account.color }};">
-        {{ initials }}
-    </div>
-    <div class="card-content">
-        <div class="card-top">
-            <span class="card-sender">{{ email.sender.split('<')[0].strip() if '<' in email.sender else email.sender }}</span>
-            <span class="card-time">{{ time_ago }}</span>
+    <div class="ei-main">
+        <div class="ei-top">
+            <span class="dot-sm acct-dot" style="background:{{ email.account.color if email.account else 'var(--text-muted)' }}" title="{{ email.account.display_name if email.account else '' }}"></span>
+            <span class="ei-sender">{{ sender_name }}</span>
         </div>
-        <div class="card-subject">{{ email.subject }}</div>
-        <div class="card-snippet">{{ email.snippet[:100] if email.snippet else '' }}{% if email.snippet and email.snippet|length > 100 %}...{% endif %}</div>
-        <div class="card-meta">
-            {% if email.priority %}
-            <span class="priority-dot dot-{{ email.priority }}"></span>
-            {% endif %}
-            {% if email.category %}
-            <span class="card-category">{{ email.category }}</span>
-            {% endif %}
+        <div class="ei-summary">{{ email.summary or email.snippet or email.subject }}</div>
+        <div class="ei-bottom-row">
+            <span class="ei-time">{{ time_ago }}</span>
+        </div>
+    </div>
+    <div class="ei-score">
+        <div class="score-ring" style="width:38px;height:38px;">
+            <svg viewBox="0 0 38 38" width="38" height="38" style="transform:rotate(-90deg);">
+                <circle cx="19" cy="19" r="{{ ring_r }}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="4"/>
+                <circle cx="19" cy="19" r="{{ ring_r }}" fill="none" stroke="{{ ring_color }}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{ ring_circumf }}" stroke-dashoffset="{{ ring_offset }}"/>
+            </svg>
+            <div class="score-ring-num" style="font-size:12px;color:{{ ring_color }};">{{ score }}</div>
         </div>
     </div>
 </div>

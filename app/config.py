@@ -20,12 +20,6 @@ GMAIL_SCOPES = [
 # Ollama settings
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
-# Database settings
-DATABASE_URL = "sqlite+aiosqlite:///./data/inboxzen.db"
-
-# Secret key for session/cookie signing
-SECRET_KEY = os.getenv("SECRET_KEY", "inboxzen-secret-key-change-in-production")
-
 # Account color palette (for multi-account assignment)
 ACCOUNT_COLORS = [
     "#3B82F6",  # Blue
@@ -40,6 +34,3 @@ ACCOUNT_COLORS = [
 
 # Default poll interval (in minutes)
 DEFAULT_POLL_INTERVAL = 5
-
-# Triage priority tiers
-PRIORITY_TIERS = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]

@@ -1,35 +1,31 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
-import secrets
 
 from app.database import get_db
 from app.models import Account
 from app.auth.google_oauth import get_google_auth_url, exchange_code_for_tokens, get_user_email
 from app.config import ACCOUNT_COLORS
+from app.services.gmail_sync import sync_all_accounts
+from app.services.triage import triage_new_emails
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 @router.get("/connect")
 async def connect_account():
     """Initiate Google OAuth2 flow for connecting a Gmail account"""
-    authorization_url, state, flow = get_google_auth_url()
-    
-    # Store state in session for CSRF protection (simplified - in production use secure session)
-    # For MVP, we'll use a simple approach
+    authorization_url, state = get_google_auth_url()
     return RedirectResponse(url=authorization_url)
 
 @router.get("/oauth2callback")
 async def oauth2callback(code: str = None, state: str = None, db: AsyncSession = Depends(get_db)):
     """Handle Google OAuth2 callback"""
-    if not code:
-        raise HTTPException(status_code=400, detail="Authorization code not provided")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Authorization code or state not provided")
     
     try:
-        # Exchange code for tokens
-        tokens = exchange_code_for_tokens(code)
+        tokens = exchange_code_for_tokens(code, state)
         
         # Get user's email address
         email = get_user_email(tokens["access_token"], tokens["refresh_token"])
@@ -68,28 +64,15 @@ async def oauth2callback(code: str = None, state: str = None, db: AsyncSession =
         await db.commit()
         await db.refresh(account)
         
-        # Redirect to inbox
+        # Sync emails and triage on first connect
+        new_emails = await sync_all_accounts(db)
+        if new_emails:
+            await triage_new_emails(db)
+        
         return RedirectResponse(url="/")
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OAuth2 flow failed: {str(e)}")
-
-@router.get("/")
-async def list_accounts(db: AsyncSession = Depends(get_db)):
-    """List all connected Gmail accounts"""
-    result = await db.execute(select(Account))
-    accounts = result.scalars().all()
-    
-    return [
-        {
-            "id": account.id,
-            "email": account.email,
-            "display_name": account.display_name,
-            "color": account.color,
-            "created_at": account.created_at.isoformat()
-        }
-        for account in accounts
-    ]
 
 @router.delete("/{account_id}")
 async def disconnect_account(account_id: int, db: AsyncSession = Depends(get_db)):
@@ -100,9 +83,7 @@ async def disconnect_account(account_id: int, db: AsyncSession = Depends(get_db)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
-    # In a real app, you might want to revoke the token with Google
-    # For MVP, we'll just delete the account
     await db.delete(account)
     await db.commit()
     
-    return {"message": "Account disconnected successfully"}
+    return HTMLResponse("")

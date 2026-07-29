@@ -1,86 +1,111 @@
-<div class="detail-header">
-    <h1 class="detail-subject">{{ email.subject }}</h1>
-    <span class="detail-date">{{ email.received_at.strftime('%a %d %b, %H:%M') if email.received_at else '' }}</span>
-</div>
+{% set score = email.relevance_score|int if email.relevance_score is defined and email.relevance_score is not none else 0 %}
+{% set sender_name = email.sender.split('<')[0].strip() if '<' in email.sender else email.sender %}
+{% set sender_email = email.sender.split('<')[1].split('>')[0] if '<' in email.sender else '' %}
+{% set account_label = email.account.display_name if email.account else '' %}
 
-<div class="detail-sender">
-    <div class="avatar" style="background-color: {{ email.account.color }};">
-        {{ get_initials(email.sender) }}
-    </div>
-    <div class="detail-sender-info">
-        <div class="detail-sender-name">
-            {{ email.sender.split('<')[0].strip() if '<' in email.sender else email.sender }}
-        </div>
-        <div class="detail-sender-email">
-            {% if '<' in email.sender %}
-                &lt;{{ email.sender.split('<')[1].split('>')[0] }}&gt;
-            {% endif %}
-        </div>
-    </div>
-    {% if email.category %}
-    <span class="category-tag">{{ email.category }}</span>
-    {% endif %}
-</div>
-
-<div class="detail-actions">
-    <button class="action-btn action-reply">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h10a8 8 0 0 1 8 8v2M3 10l6 6m-6-6l6-6"/></svg>
-        Reply
-    </button>
-    <button class="action-btn" title="Star">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-    </button>
-    <button class="action-btn" title="Archive"
-            hx-post="/inbox/{{ email.id }}/archive"
-            hx-confirm="Archive this email?">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-    </button>
-    <button class="action-btn" title="More">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-    </button>
-</div>
-
-{% if email.summary %}
-<div class="zen-summary">
-    <div class="zen-header">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        ZEN SUMMARY
-    </div>
-    <p class="zen-text">{{ email.summary }}</p>
-    <div class="zen-tags">
-        {% if email.priority %}
-        <span class="zen-tag tag-priority">{{ email.priority|lower }} priority</span>
-        {% endif %}
-        {% if email.category %}
-        <span class="zen-tag tag-category">{{ email.category }}</span>
-        {% endif %}
-    </div>
-    <div class="zen-meta">
-        <span>llama3.1:8b</span>
-        <span class="zen-dot"></span>
-        <span>1.02s</span>
-        <span class="zen-dot"></span>
-        <span>rated by AI</span>
-    </div>
-</div>
+{# Score ring color tiers #}
+{% if score >= 90 %}
+  {% set ring_color = '#4fd18b' %}
+{% elif score >= 70 %}
+  {% set ring_color = '#e8c34c' %}
+{% else %}
+  {% set ring_color = '#9a9aa4' %}
 {% endif %}
 
-<div class="detail-body">
-    {% if email.body %}
-        {{ email.body|replace('\n', '<br>')|safe }}
-    {% elif email.snippet %}
-        {{ email.snippet }}
-    {% else %}
-        <p class="no-content">No content available</p>
-    {% endif %}
-</div>
+{# Detail score ring: size=84, stroke=6, radius = (84/2) - (6/2) - 1 = 35 #}
+{% set ring_r = 35 %}
+{% set ring_circumf = (2 * 3.14159265 * ring_r)|round(4) %}
+{% set ring_offset = (ring_circumf * (1 - score / 100))|round(4) %}
 
-<div class="detail-footer">
-    {% if email.account %}
-    <span>To: {{ email.account.email }}</span>
+<div class="reading-scroll"><div class="rp-content">
+    <div class="d-header">
+        <h1 class="d-subject">{{ email.subject }}</h1>
+        <div class="d-time">{{ email.received_at.strftime('%a %d %b, %H:%M') if email.received_at else '' }}</div>
+    </div>
+
+    <div class="d-sender-row">
+        <div>
+            <div class="d-sender-name">{{ sender_name }}</div>
+            <div class="d-sender-email">
+                {% if email.account %}
+                <span class="dot-sm" style="background:{{ email.account.color }};"></span>
+                {% endif %}
+                {% if sender_email %}
+                <span>{{ sender_email }}</span>
+                <span style="opacity:0.4;">&middot;</span>
+                {% endif %}
+                <span>{{ account_label }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="actions-row">
+        <button class="icon-btn" title="Star">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        </button>
+        <button class="icon-btn" title="Archive"
+                hx-post="/inbox/{{ email.id }}/archive"
+                hx-confirm="Archive this email?">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8H3v13h18V8z"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+        </button>
+        <button class="icon-btn" title="More">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+        </button>
+    </div>
+
+    {% if email.summary %}
+    <div class="zen-card">
+        <div class="zen-left">
+            <div class="zen-heading">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/></svg>
+                <span>Zen Summary</span>
+            </div>
+            <p class="zen-summary">{{ email.summary }}</p>
+            <div class="zen-footer">rated by AI</div>
+        </div>
+        <div class="gauge-wrap">
+            <div class="score-ring" style="width:84px;height:84px;">
+                <svg viewBox="0 0 84 84" width="84" height="84" style="transform:rotate(-90deg);">
+                    <circle cx="42" cy="42" r="{{ ring_r }}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
+                    <circle cx="42" cy="42" r="{{ ring_r }}" fill="none" stroke="{{ ring_color }}" stroke-width="6" stroke-linecap="round" stroke-dasharray="{{ ring_circumf }}" stroke-dashoffset="{{ ring_offset }}"/>
+                </svg>
+                <div class="score-ring-num" style="font-size:22px;color:{{ ring_color }};">{{ score }}</div>
+            </div>
+            <div class="gauge-label">Relevancy</div>
+        </div>
+    </div>
     {% endif %}
-    {% if email.received_at %}
-    <span class="footer-dot"></span>
-    <span>{{ email.received_at.strftime('%a %d %b, %H:%M') }}</span>
-    {% endif %}
-</div>
+
+    <div class="rp-body">
+        {% if email.body %}
+            {% for paragraph in email.body.split('\n') %}
+                {% if paragraph.strip() %}
+                    <p>{{ paragraph }}</p>
+                {% endif %}
+            {% endfor %}
+        {% elif email.snippet %}
+            <p>{{ email.snippet }}</p>
+        {% else %}
+            <p class="no-content">No content available</p>
+        {% endif %}
+
+        {% if email_links is defined and email_links %}
+            {% for link in email_links %}
+            <span class="link-chip">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+                {{ link|truncate(45, True, '') }}
+            </span>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <div class="rp-footer">
+        {% if email.account %}
+        <span>To: {{ email.account.email }}</span>
+        {% endif %}
+        {% if email.received_at %}
+        <span class="footer-dot"></span>
+        <span>{{ sender_name[:2]|upper }} on {{ email.received_at.strftime('%a %d %b, %H:%M') }}</span>
+        {% endif %}
+    </div>
+</div></div>

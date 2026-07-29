@@ -1,15 +1,8 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
-import enum
+from datetime import datetime, timezone
 
 from app.database import Base
-
-class PriorityTier(str, enum.Enum):
-    CRITICAL = "CRITICAL"
-    HIGH = "HIGH"
-    MEDIUM = "MEDIUM"
-    LOW = "LOW"
 
 class Account(Base):
     __tablename__ = "accounts"
@@ -21,7 +14,7 @@ class Account(Base):
     access_token = Column(Text)
     refresh_token = Column(Text)
     token_expiry = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationship to emails
     emails = relationship("Email", back_populates="account")
@@ -42,7 +35,7 @@ class Email(Base):
     
     # Triage fields
     summary = Column(Text, nullable=True)
-    priority = Column(String, nullable=True)  # PriorityTier enum as string
+    relevance_score = Column(Integer, nullable=True)  # 0-100
     category = Column(String, nullable=True)
     triaged_at = Column(DateTime, nullable=True)
     

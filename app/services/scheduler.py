@@ -1,6 +1,5 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-import asyncio
 
 from app.database import async_session
 from app.services.gmail_sync import sync_all_accounts
