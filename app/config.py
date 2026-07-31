@@ -20,6 +20,10 @@ GMAIL_SCOPES = [
 # Ollama settings
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
+# API key settings (for OpenAI/OpenRouter providers)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
 # Account color palette (for multi-account assignment)
 ACCOUNT_COLORS = [
     "#3B82F6",  # Blue
@@ -31,6 +35,3 @@ ACCOUNT_COLORS = [
     "#06B6D4",  # Cyan
     "#84CC16",  # Lime
 ]
-
-# Default poll interval (in minutes)
-DEFAULT_POLL_INTERVAL = 5

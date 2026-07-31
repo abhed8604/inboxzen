@@ -1,0 +1,417 @@
+<!-- ============================================================
+     01 GENERAL
+     ============================================================ -->
+<div class="settings-section-pane active" id="section-general">
+    <div class="settings-topbar">
+        <div class="settings-topbar-heading">
+            <div class="eyebrow">01 · General</div>
+            <h1>Appearance</h1>
+            <p>How InboxZen looks on this device.</p>
+        </div>
+        <div class="settings-topbar-right">
+            <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
+        </div>
+    </div>
+    <div class="settings-content">
+        <div class="settings-field-block">
+            <p class="settings-field-label">Theme</p>
+            <div class="settings-theme-row">
+                <button class="settings-theme-card {% if theme == 'dark' %}active{% endif %}" onclick="settingsSetTheme('dark', this)">
+                    <div class="settings-theme-swatch swatch-dark"><span></span><span class="swatch-acc"></span><span></span></div>
+                    <div class="swatch-name">Dark</div>
+                </button>
+                <button class="settings-theme-card {% if theme == 'light' %}active{% endif %}" onclick="settingsSetTheme('light', this)">
+                    <div class="settings-theme-swatch swatch-light"><span></span><span class="swatch-acc"></span><span></span></div>
+                    <div class="swatch-name">Light</div>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     02 AI ENGINE
+     ============================================================ -->
+<div class="settings-section-pane" id="section-engine">
+    <div class="settings-topbar">
+        <div class="settings-topbar-heading">
+            <div class="eyebrow">02 · AI engine</div>
+            <h1>Model provider</h1>
+            <p>Pick what powers the triage engine.</p>
+        </div>
+        <div class="settings-topbar-right">
+            <div class="settings-status-chip">
+                <span class="chip-dot{% if not llm_online %} offline{% endif %}"></span>
+                {% if llm_provider == 'ollama' %}ollama · local{% elif llm_provider == 'openai' %}openai · api{% else %}openrouter · api{% endif %}
+            </div>
+            <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
+        </div>
+    </div>
+    <div class="settings-content">
+        <div class="settings-field-block">
+            <p class="settings-field-label">Provider</p>
+            <div class="settings-segmented" id="settingsProviderSeg">
+                <button class="settings-seg-btn {% if llm_provider == 'ollama' %}active accent{% endif %}" onclick="settingsShowProvider('ollama', this)">Ollama</button>
+                <button class="settings-seg-btn {% if llm_provider == 'openai' %}active{% endif %}" onclick="settingsShowProvider('openai', this)">OpenAI</button>
+                <button class="settings-seg-btn {% if llm_provider == 'openrouter' %}active{% endif %}" onclick="settingsShowProvider('openrouter', this)">OpenRouter</button>
+            </div>
+            <p class="settings-field-hint">Ollama keeps every email on this machine. Nothing leaves your network.</p>
+        </div>
+
+        <!-- Ollama Config -->
+        <div id="settings-provider-ollama" class="settings-provider-block" style="{% if llm_provider != 'ollama' %}display:none;{% endif %}">
+            <div class="settings-field-block">
+                <p class="settings-field-label">Local model</p>
+                <form hx-post="/settings/model" hx-target="#toast-container" hx-swap="beforeend">
+                    {% if ollama_models %}
+                    <select name="model" class="settings-select">
+                        <option value="">Select a model...</option>
+                        {% for model in ollama_models %}
+                        <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="model" class="settings-input" value="{{ selected_model }}" placeholder="e.g. llama3.2">
+                    <p class="settings-field-hint">Could not connect to Ollama at {{ ollama_host or 'localhost:11434' }}</p>
+                    {% endif %}
+                    <div style="margin-top: 12px;">
+                        <button type="submit" class="settings-btn settings-btn-primary">Save model</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- OpenAI Config -->
+        <div id="settings-provider-openai" class="settings-provider-block" style="{% if llm_provider != 'openai' %}display:none;{% endif %}">
+            <div class="settings-field-block">
+                <p class="settings-field-label">API key</p>
+                <form hx-post="/settings/openai-key" hx-target="#toast-container" hx-swap="beforeend">
+                    <input type="password" name="api_key" class="settings-input" placeholder="sk-..."
+                           {% if openai_key_set %}value="••••••••••••••••••••"{% endif %}>
+                    <p class="settings-field-hint">{% if openai_key_set %}Key is set. Enter new to replace.{% else %}Stored locally, never synced.{% endif %}</p>
+                    <div style="margin-top: 12px;">
+                        <button type="submit" class="settings-btn settings-btn-primary">Save key</button>
+                    </div>
+                </form>
+            </div>
+            <div class="settings-field-block">
+                <p class="settings-field-label">Model</p>
+                <form hx-post="/settings/model" hx-target="#toast-container" hx-swap="beforeend">
+                    <input type="text" name="model" class="settings-input" value="{{ openai_model }}" placeholder="gpt-4o">
+                    <p class="settings-field-hint">gpt-4o, gpt-4o-mini, gpt-4-turbo</p>
+                    <div style="margin-top: 12px;">
+                        <button type="submit" class="settings-btn settings-btn-primary">Save model</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- OpenRouter Config -->
+        <div id="settings-provider-openrouter" class="settings-provider-block" style="{% if llm_provider != 'openrouter' %}display:none;{% endif %}">
+            <div class="settings-field-block">
+                <p class="settings-field-label">API key</p>
+                <form hx-post="/settings/openrouter-key" hx-target="#toast-container" hx-swap="beforeend">
+                    <input type="password" name="api_key" class="settings-input" placeholder="sk-or-..."
+                           {% if openrouter_key_set %}value="••••••••••••••••••••"{% endif %}>
+                    <p class="settings-field-hint">{% if openrouter_key_set %}Key is set. Enter new to replace.{% else %}Get your key at openrouter.ai{% endif %}</p>
+                    <div style="margin-top: 12px;">
+                        <button type="submit" class="settings-btn settings-btn-primary">Save key</button>
+                    </div>
+                </form>
+            </div>
+            <div class="settings-field-block">
+                <p class="settings-field-label">Model</p>
+                <div style="position: relative;" id="settings-or-model-search">
+                    <input type="text" id="settings-or-model-input" class="settings-input" placeholder="Search models..." autocomplete="off" value="{{ openrouter_model }}">
+                    <input type="hidden" id="settings-or-model-hidden" value="{{ openrouter_model }}">
+                    <div id="settings-or-model-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; max-height:320px; overflow-y:auto; background:#1C212E; border:1px solid #242A38; border-radius:8px; z-index:100; margin-top:4px; box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
+                </div>
+                <p class="settings-field-hint">Start typing to search.</p>
+                <div style="margin-top: 12px;">
+                    <button type="button" class="settings-btn settings-btn-primary" onclick="settingsSaveOpenRouterModel()">Save model</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Parallel Requests (API providers only) -->
+        <div id="settings-parallel-section" class="settings-provider-block" style="{% if llm_provider == 'ollama' %}display:none;{% endif %}">
+            <div class="settings-divider"></div>
+            <div class="settings-field-block">
+                <p class="settings-field-label">Parallel requests</p>
+                <p class="settings-field-hint" style="margin-top:0; margin-bottom:10px;">Concurrent API requests. Higher = faster but may hit rate limits.</p>
+                <form hx-post="/settings/parallel-requests" hx-target="#toast-container" hx-swap="beforeend" style="display:flex; align-items:center; gap:10px;">
+                    <input type="number" name="count" class="settings-input" value="{{ parallel_requests }}" min="1" max="20" step="1" style="width:100px;">
+                    <button type="submit" class="settings-btn settings-btn-primary">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     03 TRIAGE RULES
+     ============================================================ -->
+<div class="settings-section-pane" id="section-rules">
+    <div class="settings-topbar">
+        <div class="settings-topbar-heading">
+            <div class="eyebrow">03 · Triage rules</div>
+            <h1>Scoring prompt</h1>
+            <p>Guides how the model ranks incoming mail.</p>
+        </div>
+        <div class="settings-topbar-right">
+            <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
+        </div>
+    </div>
+    <div class="settings-content settings-content-stretch">
+        <div class="settings-field-block" style="flex:1; display:flex; flex-direction:column; margin-bottom:0;">
+            <div class="settings-editor" style="flex:1;">
+                <div class="settings-editor-gutter" id="settingsGutter"></div>
+                <textarea id="settingsRulesArea" spellcheck="false">{{ ai_rules }}</textarea>
+            </div>
+            <div class="settings-editor-foot">
+                <span class="settings-editor-meta" id="settingsCharCount">— characters</span>
+                <span class="settings-editor-meta">rules v3</span>
+            </div>
+        </div>
+        <div style="padding-top:12px; flex-shrink:0;">
+            <form hx-post="/settings/ai-rules" hx-target="#toast-container" hx-swap="beforeend">
+                <input type="hidden" name="rules" id="settingsRulesHidden">
+                <button type="submit" class="settings-btn settings-btn-primary" onclick="document.getElementById('settingsRulesHidden').value=document.getElementById('settingsRulesArea').value">Save rules</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     04 RESCAN
+     ============================================================ -->
+<div class="settings-section-pane" id="section-rescan">
+    <div class="settings-topbar">
+        <div class="settings-topbar-heading">
+            <div class="eyebrow">04 · Rescan</div>
+            <h1>Re-triage window</h1>
+            <p>How much of your inbox gets re-scored on demand.</p>
+        </div>
+        <div class="settings-topbar-right">
+            <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
+        </div>
+    </div>
+    <div class="settings-content">
+        <div class="settings-field-block">
+            <p class="settings-field-label">Recent emails to rescan</p>
+            <form hx-post="/settings/rescan-count" hx-target="#toast-container" hx-swap="beforeend" style="display:flex; align-items:center; gap:10px;">
+                <select name="count" class="settings-select" style="width: 140px;">
+                    <option value="1">1 email</option>
+                    <option value="5">5 emails</option>
+                    <option value="10">10 emails</option>
+                    <option value="25">25 emails</option>
+                    <option value="50" selected>50 emails</option>
+                    <option value="100">100 emails</option>
+                </select>
+                <button type="submit" class="settings-btn settings-btn-primary">Save</button>
+            </form>
+            <p class="settings-field-hint">Runs whenever you click Rescan in the toolbar. Higher numbers take longer with local models.</p>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     05 ACCOUNTS
+     ============================================================ -->
+<div class="settings-section-pane" id="section-accounts">
+    <div class="settings-topbar">
+        <div class="settings-topbar-heading">
+            <div class="eyebrow">05 · Accounts</div>
+            <h1>Connected accounts</h1>
+            <p>Inboxes InboxZen is currently watching.</p>
+        </div>
+        <div class="settings-topbar-right">
+            <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
+        </div>
+    </div>
+    <div class="settings-content">
+        {% if accounts %}
+        {% for account in accounts %}
+        <div class="settings-account-row" id="account-row-{{ account.id }}">
+            <div class="settings-acc-avatar" style="border-color: {{ account.color }};">
+                <div class="settings-acc-tag" style="background: {{ account.color }};"></div>
+                {{ (account.display_name or account.email.split('@')[0])[:2] | upper }}
+            </div>
+            <div class="settings-acc-info">
+                <div class="acc-name">{{ account.display_name or account.email.split('@')[0] }}</div>
+                <div class="acc-mail">{{ account.email }}</div>
+            </div>
+            <div class="settings-acc-provider">Email</div>
+            <button class="settings-btn settings-btn-danger"
+                    hx-delete="/accounts/{{ account.id }}"
+                    hx-confirm="Disconnect this account? This will remove all synced emails."
+                    hx-target="#account-row-{{ account.id }}"
+                    hx-swap="outerHTML">
+                Disconnect
+            </button>
+        </div>
+        {% endfor %}
+        {% endif %}
+        <a href="/accounts/connect" class="settings-add-row">
+            <span style="font-size:15px;">+</span> Connect another account
+        </a>
+    </div>
+</div>
+
+<script>
+/* ── Theme switching ─────────────────────────────── */
+function settingsSetTheme(theme, card) {
+    document.querySelectorAll('.settings-theme-card').forEach(function(c) { c.classList.remove('active'); });
+    card.classList.add('active');
+    document.documentElement.setAttribute('data-theme', theme);
+    fetch('/settings/theme', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'theme=' + encodeURIComponent(theme)
+    })
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+        var toast = document.getElementById('toast-container');
+        toast.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+/* ── Provider switching ──────────────────────────── */
+function settingsShowProvider(provider, btn) {
+    document.querySelectorAll('#settingsProviderSeg .settings-seg-btn').forEach(function(b) {
+        b.classList.remove('active', 'accent');
+    });
+    btn.classList.add('active');
+    if (provider === 'ollama') btn.classList.add('accent');
+
+    document.querySelectorAll('.settings-provider-block').forEach(function(el) { el.style.display = 'none'; });
+    var block = document.getElementById('settings-provider-' + provider);
+    if (block) block.style.display = '';
+
+    var parallelSection = document.getElementById('settings-parallel-section');
+    if (parallelSection) {
+        parallelSection.style.display = provider === 'ollama' ? 'none' : '';
+    }
+}
+
+/* ── Code editor (line numbers + char count) ─────── */
+(function() {
+    var area = document.getElementById('settingsRulesArea');
+    var gutter = document.getElementById('settingsGutter');
+    var charCount = document.getElementById('settingsCharCount');
+    if (!area || !gutter) return;
+
+    function renderGutter() {
+        var lines = area.value.split('\n').length;
+        var out = '';
+        for (var i = 1; i <= lines; i++) out += i + '\n';
+        gutter.textContent = out;
+        if (charCount) charCount.textContent = area.value.length.toLocaleString() + ' characters';
+    }
+    area.addEventListener('input', renderGutter);
+    area.addEventListener('scroll', function() { gutter.scrollTop = area.scrollTop; });
+    renderGutter();
+})();
+
+/* ── OpenRouter model search ─────────────────────── */
+var settingsORModels = [];
+var settingsORLoaded = false;
+
+function settingsLoadORModels() {
+    if (settingsORLoaded) return;
+    fetch('/settings/api/models/openrouter')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            settingsORModels = data.models || [];
+            settingsORLoaded = true;
+            settingsRenderORModels(document.getElementById('settings-or-model-input').value);
+        })
+        .catch(function() { settingsORLoaded = true; });
+}
+
+function settingsRenderORModels(query) {
+    var dropdown = document.getElementById('settings-or-model-dropdown');
+    if (!dropdown) return;
+    var current = document.getElementById('settings-or-model-hidden').value;
+    var filtered = settingsORModels;
+    if (query && query.length > 0) {
+        var q = query.toLowerCase();
+        filtered = settingsORModels.filter(function(m) {
+            return m.id.toLowerCase().indexOf(q) !== -1 || (m.name && m.name.toLowerCase().indexOf(q) !== -1);
+        });
+    }
+    var html = '';
+    var shown = 0;
+    for (var i = 0; i < filtered.length && shown < 50; i++) {
+        var m = filtered[i];
+        var sel = m.id === current ? ' background:#7FE8C015; border-left:3px solid #7FE8C0;' : '';
+        var price = '';
+        if (m.prompt_price !== undefined) {
+            price = ' ($' + m.prompt_price.toFixed(7) + '/tok in, $' + m.completion_price.toFixed(7) + '/tok out)';
+        }
+        var ctx = m.context_length ? ' [' + (m.context_length / 1000).toFixed(0) + 'k]' : '';
+        html += '<div style="padding:10px 14px; cursor:pointer; border-bottom:1px solid #242A38; font-family:IBM Plex Mono,monospace; font-size:12px;' + sel + '" onclick="settingsSelectORModel(\'' + m.id.replace(/'/g, "\\'") + '\')" onmouseover="this.style.background=\'#7FE8C010\'" onmouseout="this.style.background=\'' + (sel ? '#7FE8C015' : 'transparent') + '\'">' +
+                '<div style="font-size:13px; font-weight:500; color:#ECE8DE; font-family:IBM Plex Sans,sans-serif;">' + (m.name || m.id) + '</div>' +
+                '<div style="font-size:11px; color:#565C6C; margin-top:2px;">' + m.id + ctx + price + '</div>' +
+                '</div>';
+        shown++;
+    }
+    if (shown === 0 && settingsORModels.length > 0) {
+        html = '<div style="padding:10px 14px; color:#565C6C; font-style:italic;">No models match your search</div>';
+    } else if (settingsORModels.length === 0) {
+        html = '<div style="padding:10px 14px; color:#565C6C; font-style:italic;">No models available. Check your API key.</div>';
+    }
+    dropdown.innerHTML = html;
+    if (query || filtered.length > 0) dropdown.style.display = 'block';
+}
+
+function settingsSelectORModel(id) {
+    document.getElementById('settings-or-model-hidden').value = id;
+    document.getElementById('settings-or-model-input').value = id;
+    document.getElementById('settings-or-model-dropdown').style.display = 'none';
+}
+
+function settingsSaveOpenRouterModel() {
+    var model = document.getElementById('settings-or-model-hidden').value;
+    if (!model) { alert('Please select a model first'); return; }
+    fetch('/settings/model', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'model=' + encodeURIComponent(model)
+    })
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var searchInput = document.getElementById('settings-or-model-input');
+    var dropdown = document.getElementById('settings-or-model-dropdown');
+
+    if (searchInput) {
+        searchInput.addEventListener('focus', function() {
+            settingsLoadORModels();
+            settingsRenderORModels(this.value);
+        });
+        searchInput.addEventListener('input', function() {
+            document.getElementById('settings-or-model-hidden').value = this.value;
+            settingsRenderORModels(this.value);
+        });
+        searchInput.addEventListener('click', function(e) {
+            e.stopPropagation();
+            settingsLoadORModels();
+            settingsRenderORModels(this.value);
+        });
+    }
+
+    document.addEventListener('click', function(e) {
+        if (dropdown && !e.target.closest('#settings-or-model-search')) {
+            dropdown.style.display = 'none';
+        }
+    });
+    if (dropdown) {
+        dropdown.addEventListener('click', function(e) { e.stopPropagation(); });
+    }
+});
+</script>

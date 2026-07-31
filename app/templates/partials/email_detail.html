@@ -2,14 +2,18 @@
 {% set sender_name = email.sender.split('<')[0].strip() if '<' in email.sender else email.sender %}
 {% set sender_email = email.sender.split('<')[1].split('>')[0] if '<' in email.sender else '' %}
 {% set account_label = email.account.display_name if email.account else '' %}
+{% set sender_initial = sender_name[:1]|upper if sender_name else '?' %}
 
 {# Score ring color tiers #}
 {% if score >= 90 %}
-  {% set ring_color = '#4fd18b' %}
+  {% set ring_color = 'var(--signal)' %}
+  {% set score_tier = 'score-urgent' %}
 {% elif score >= 70 %}
-  {% set ring_color = '#e8c34c' %}
+  {% set ring_color = 'var(--amber)' %}
+  {% set score_tier = 'score-important' %}
 {% else %}
-  {% set ring_color = '#9a9aa4' %}
+  {% set ring_color = 'var(--ash)' %}
+  {% set score_tier = 'score-low' %}
 {% endif %}
 
 {# Detail score ring: size=84, stroke=6, radius = (84/2) - (6/2) - 1 = 35 #}
@@ -24,12 +28,10 @@
     </div>
 
     <div class="d-sender-row">
+        <div class="d-sender-avatar" style="border-color:{{ email.account.color if email.account else 'var(--line)' }};color:{{ email.account.color if email.account else 'var(--signal)' }}">{{ sender_initial }}</div>
         <div>
             <div class="d-sender-name">{{ sender_name }}</div>
             <div class="d-sender-email">
-                {% if email.account %}
-                <span class="dot-sm" style="background:{{ email.account.color }};"></span>
-                {% endif %}
                 {% if sender_email %}
                 <span>{{ sender_email }}</span>
                 <span style="opacity:0.4;">&middot;</span>
@@ -43,6 +45,12 @@
         <button class="icon-btn" title="Star">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
         </button>
+        <button class="icon-btn" title="Rescan with AI"
+                hx-post="/inbox/{{ email.id }}/rescan"
+                hx-target="#zen-card"
+                hx-swap="outerHTML">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
         <button class="icon-btn" title="Archive"
                 hx-post="/inbox/{{ email.id }}/archive"
                 hx-confirm="Archive this email?">
@@ -53,36 +61,42 @@
         </button>
     </div>
 
-    {% if email.summary %}
-    <div class="zen-card">
+    <div id="zen-card" class="zen-card">
         <div class="zen-left">
             <div class="zen-heading">
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/></svg>
                 <span>Zen Summary</span>
             </div>
+            {% if email.summary %}
             <p class="zen-summary">{{ email.summary }}</p>
             <div class="zen-footer">rated by AI</div>
+            {% else %}
+            <p class="zen-summary" style="opacity:0.4;font-style:italic;">No summary yet</p>
+            <div class="zen-footer">click refresh to analyze</div>
+            {% endif %}
         </div>
         <div class="gauge-wrap">
-            <div class="score-ring" style="width:84px;height:84px;">
+            <div class="score-ring {{ score_tier }}" style="width:84px;height:84px;">
                 <svg viewBox="0 0 84 84" width="84" height="84" style="transform:rotate(-90deg);">
-                    <circle cx="42" cy="42" r="{{ ring_r }}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
+                    <circle cx="42" cy="42" r="{{ ring_r }}" fill="none" stroke="var(--g-800)" stroke-width="6"/>
                     <circle cx="42" cy="42" r="{{ ring_r }}" fill="none" stroke="{{ ring_color }}" stroke-width="6" stroke-linecap="round" stroke-dasharray="{{ ring_circumf }}" stroke-dashoffset="{{ ring_offset }}"/>
                 </svg>
-                <div class="score-ring-num" style="font-size:22px;color:{{ ring_color }};">{{ score }}</div>
+                <div class="score-ring-num" style="font-size:22px;">{{ score }}</div>
             </div>
             <div class="gauge-label">Relevancy</div>
         </div>
     </div>
-    {% endif %}
 
     <div class="rp-body">
         {% if email.body %}
-            {% for paragraph in email.body.split('\n') %}
-                {% if paragraph.strip() %}
-                    <p>{{ paragraph }}</p>
-                {% endif %}
-            {% endfor %}
+            <iframe
+                class="email-iframe"
+                sandbox="allow-same-origin"
+                scrolling="no"
+                frameborder="0"
+                src="/inbox/{{ email.id }}/body?theme={{ theme|default('dark') }}"
+                onload="try{this.style.height=Math.max(this.contentDocument.body.scrollHeight,100)+'px';}catch(e){}"
+            ></iframe>
         {% elif email.snippet %}
             <p>{{ email.snippet }}</p>
         {% else %}
@@ -91,10 +105,10 @@
 
         {% if email_links is defined and email_links %}
             {% for link in email_links %}
-            <span class="link-chip">
+            <a href="{{ link }}" target="_blank" rel="noopener" class="link-chip">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
                 {{ link|truncate(45, True, '') }}
-            </span>
+            </a>
             {% endfor %}
         {% endif %}
     </div>

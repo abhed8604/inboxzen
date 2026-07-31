@@ -8,7 +8,7 @@ from app.models import Account
 from app.auth.google_oauth import get_google_auth_url, exchange_code_for_tokens, get_user_email
 from app.config import ACCOUNT_COLORS
 from app.services.gmail_sync import sync_all_accounts
-from app.services.triage import triage_new_emails
+from app.services.triage_runner import run_triage_scan
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -67,7 +67,7 @@ async def oauth2callback(code: str = None, state: str = None, db: AsyncSession =
         # Sync emails and triage on first connect
         new_emails = await sync_all_accounts(db)
         if new_emails:
-            await triage_new_emails(db)
+                await run_triage_scan(db)
         
         return RedirectResponse(url="/")
         

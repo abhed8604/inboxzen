@@ -1,9 +1,12 @@
+import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.database import async_session
 from app.services.gmail_sync import sync_all_accounts
-from app.services.triage import triage_new_emails
+from app.services.triage_runner import run_triage_scan
+
+logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
 
@@ -16,16 +19,15 @@ async def sync_job():
             
             # Triage any new emails
             if new_emails:
-                await triage_new_emails(db)
+                await run_triage_scan(db)
                 
-            print(f"Sync job completed. {len(new_emails)} new emails found.")
+            logger.info("Sync job completed. %d new emails found.", len(new_emails))
     except Exception as e:
-        print(f"Sync job failed: {e}")
+        logger.error("Sync job failed: %s", e)
 
 def start_scheduler():
     """Start the background scheduler"""
     if not scheduler.running:
-        # Add sync job with default interval (5 minutes)
         scheduler.add_job(
             func=sync_job,
             trigger=IntervalTrigger(minutes=5),
@@ -34,13 +36,4 @@ def start_scheduler():
             replace_existing=True
         )
         scheduler.start()
-        print("Scheduler started with 5-minute interval")
-
-def update_scheduler_interval(minutes: int):
-    """Update the scheduler interval"""
-    if scheduler.running:
-        scheduler.reschedule_job(
-            "email_sync_job",
-            trigger=IntervalTrigger(minutes=minutes)
-        )
-        print(f"Scheduler interval updated to {minutes} minutes")
+        logger.info("Scheduler started with 5-minute interval")

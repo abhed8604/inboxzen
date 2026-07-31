@@ -1,6 +1,9 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 data_dir = Path(__file__).parent.parent / "data"
@@ -33,3 +36,17 @@ async def init_db():
         # Import models here to ensure they are registered with Base
         from app.models import Account, Email, Settings
         await conn.run_sync(Base.metadata.create_all)
+
+        # Migration: add new columns if missing
+        from sqlalchemy import text
+
+        result = await conn.execute(text("PRAGMA table_info(emails)"))
+        existing_cols = {row[1] for row in result.fetchall()}
+
+        for col_name, col_type in [
+            ("action_required", "BOOLEAN DEFAULT 0"),
+            ("scan_model", "TEXT"),
+        ]:
+            if col_name not in existing_cols:
+                await conn.execute(text(f"ALTER TABLE emails ADD COLUMN {col_name} {col_type}"))
+                logger.info("Added column: %s", col_name)

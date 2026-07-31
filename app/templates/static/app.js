@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         setTimeout(function() {
                             node.classList.add('removing');
                             setTimeout(function() { node.remove(); }, 250);
-                        }, 4000);
+                        }, 3000);
                     }
                 });
             });

@@ -37,6 +37,8 @@ class Email(Base):
     summary = Column(Text, nullable=True)
     relevance_score = Column(Integer, nullable=True)  # 0-100
     category = Column(String, nullable=True)
+    action_required = Column(Boolean, default=False)
+    scan_model = Column(String, nullable=True)
     triaged_at = Column(DateTime, nullable=True)
     
     # Relationship to account

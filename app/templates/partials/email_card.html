@@ -5,11 +5,14 @@
 
 {# Score ring color tiers #}
 {% if score >= 90 %}
-  {% set ring_color = '#4fd18b' %}
+  {% set ring_color = 'var(--signal)' %}
+  {% set score_tier = 'score-urgent' %}
 {% elif score >= 70 %}
-  {% set ring_color = '#e8c34c' %}
+  {% set ring_color = 'var(--amber)' %}
+  {% set score_tier = 'score-important' %}
 {% else %}
-  {% set ring_color = '#9a9aa4' %}
+  {% set ring_color = 'var(--ash)' %}
+  {% set score_tier = 'score-low' %}
 {% endif %}
 
 {# Score ring SVG math: size=38, stroke=4, radius = (38/2) - (4/2) - 1 = 14 #}
@@ -17,8 +20,8 @@
 {% set ring_circumf = (2 * 3.14159265 * ring_r)|round(4) %}
 {% set ring_offset = (ring_circumf * (1 - score / 100))|round(4) %}
 
-<div class="email-card {% if is_unread %}is-unread{% else %}read{% endif %} {% if selected_email is defined and selected_email and selected_email.id == email.id %}selected{% endif %}"
-     style="--accent: {{ email.account.color if email.account else 'var(--text-muted)' }}"
+<div class="email-card {% if is_unread %}is-unread{% else %}read{% endif %} {{ score_tier }} {% if selected_email is defined and selected_email and selected_email.id == email.id %}selected{% endif %}"
+     style="--accent: {{ email.account.color if email.account else 'var(--ash)' }}"
      data-email-id="{{ email.id }}"
      onclick="selectEmail({{ email.id }})"
      hx-get="/inbox/{{ email.id }}"
@@ -26,21 +29,21 @@
      hx-swap="innerHTML">
     <div class="ei-main">
         <div class="ei-top">
-            <span class="dot-sm acct-dot" style="background:{{ email.account.color if email.account else 'var(--text-muted)' }}" title="{{ email.account.display_name if email.account else '' }}"></span>
+            <span class="dot-sm acct-dot" style="background:{{ email.account.color if email.account else 'var(--ash)' }}" title="{{ email.account.display_name if email.account else '' }}"></span>
             <span class="ei-sender">{{ sender_name }}</span>
         </div>
         <div class="ei-summary">{{ email.summary or email.snippet or email.subject }}</div>
-        <div class="ei-bottom-row">
-            <span class="ei-time">{{ time_ago }}</span>
-        </div>
     </div>
-    <div class="ei-score">
-        <div class="score-ring" style="width:38px;height:38px;">
-            <svg viewBox="0 0 38 38" width="38" height="38" style="transform:rotate(-90deg);">
-                <circle cx="19" cy="19" r="{{ ring_r }}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="4"/>
-                <circle cx="19" cy="19" r="{{ ring_r }}" fill="none" stroke="{{ ring_color }}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{ ring_circumf }}" stroke-dashoffset="{{ ring_offset }}"/>
-            </svg>
-            <div class="score-ring-num" style="font-size:12px;color:{{ ring_color }};">{{ score }}</div>
+    <div class="ei-right">
+        <div class="ei-score">
+            <div class="score-ring" style="width:38px;height:38px;">
+                <svg viewBox="0 0 38 38" width="38" height="38" style="transform:rotate(-90deg);">
+                    <circle cx="19" cy="19" r="{{ ring_r }}" fill="none" stroke="var(--g-800)" stroke-width="4"/>
+                    <circle cx="19" cy="19" r="{{ ring_r }}" fill="none" stroke="{{ ring_color }}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{ ring_circumf }}" stroke-dashoffset="{{ ring_offset }}"/>
+                </svg>
+                <div class="score-ring-num" style="font-size:12px;">{{ score }}</div>
+            </div>
         </div>
+        <span class="ei-time">{{ time_ago }}</span>
     </div>
 </div>

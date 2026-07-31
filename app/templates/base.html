@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>InboxZen</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
     <script>
       (function() {
@@ -17,11 +20,16 @@
     <script src="https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"></script>
 </head>
 <body>
-    <div class="app-layout {% if settings_mode is defined and settings_mode %}settings-mode{% endif %}">
+    <div class="app-layout">
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="brand-icon">Z</div>
+                <div class="brand-icon">
+                    <svg viewBox="0 0 32 32" width="20" height="20">
+                        <path d="M7 11l9 6 9-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                        <rect x="6" y="10" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    </svg>
+                </div>
                 <div class="brand-text">
                     <div class="brand-name">InboxZen</div>
                     <div class="brand-tag">One inbox. Zero noise.</div>
@@ -36,15 +44,19 @@
                     <span class="nav-badge">{{ unread_count }}</span>
                     {% endif %}
                 </a>
-                <button class="nav-item" hx-post="/inbox/sync" hx-target="#toast-container" hx-swap="beforeend">
+                <button class="nav-item" hx-post="/inbox/sync" hx-target="#toast-container" hx-swap="beforeend" hx-indicator="#sync-spinner">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h5"/><path d="M20 20v-5h-5"/><path d="M5.6 9a7 7 0 0 1 12-3.5L20 8"/><path d="M18.4 15a7 7 0 0 1-12 3.5L4 16"/></svg>
                     <span>Sync mails</span>
+                    <svg id="sync-spinner" class="htmx-indicator spin" viewBox="0 0 24 24" width="16" height="16"><path d="M21 12a9 9 0 1 1-6.219-8.56" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 </button>
-                <button class="nav-item" hx-post="/inbox/rescan" hx-target="#toast-container" hx-swap="beforeend">
+                <button class="nav-item" hx-post="/inbox/rescan" hx-target="#toast-container" hx-swap="beforeend" hx-indicator="#rescan-spinner">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
                     <span>Rescan</span>
+                    <svg id="rescan-spinner" class="htmx-indicator spin" viewBox="0 0 24 24" width="16" height="16"><path d="M21 12a9 9 0 1 1-6.219-8.56" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 </button>
-                <a href="/settings" class="nav-item {% if settings_mode is defined and settings_mode %}active{% endif %}">
+
+                <a href="#" class="nav-item" hx-get="/settings" hx-target="#settings-modal-body" hx-swap="innerHTML"
+                   onclick="document.getElementById('settings-modal').classList.remove('hidden'); event.preventDefault();">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2"/></svg>
                     <span>Settings</span>
                 </a>
@@ -64,9 +76,14 @@
             </div>
 
             <div class="sidebar-footer">
-                <div class="ollama-status">
-                    <span class="status-dot" style="{% if not ollama_online is defined or not ollama_online %}background:var(--red);animation:none;{% endif %}"></span>
-                    <span>Ollama {% if ollama_online is defined and ollama_online %}online{% else %}offline{% endif %} &middot; {{ ollama_model_name if ollama_model_name is defined else '...' }}</span>
+                <div class="ollama-status" id="ollama-status">
+                    <span id="llm-dot" class="status-dot"></span>
+                    <span id="llm-label">{% if llm_provider is defined and llm_provider == 'ollama' %}Ollama{% else %}API{% endif %} {% if llm_loaded is defined and llm_loaded %}Loaded{% elif llm_online is defined and llm_online %}Online{% else %}Offline{% endif %}</span>
+                    <button id="llm-unload-btn" class="ollama-unload-btn"
+                            hx-post="/ollama/unload" hx-target="#toast-container" hx-swap="beforeend"
+                            title="Unload model from GPU">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                    </button>
                 </div>
             </div>
         </aside>
@@ -125,12 +142,84 @@
     <!-- Toast notifications -->
     <div id="toast-container"></div>
 
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="settings-modal hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+        <div class="settings-modal-card">
+            <!-- Left Nav -->
+            <nav class="settings-nav">
+                <div class="settings-nav-brand">
+                    <div class="settings-nav-brand-mark">
+                        <svg viewBox="0 0 32 32" width="16" height="16">
+                            <path d="M7 11l9 6 9-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                            <rect x="6" y="10" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="settings-nav-brand-name">InboxZen</div>
+                        <div class="settings-nav-brand-sub">Settings</div>
+                    </div>
+                </div>
+                <div class="settings-nav-list" id="settingsNavList">
+                    <button class="settings-nav-item active" data-target="section-general" onclick="settingsShowSection('section-general', this)">
+                        <span class="nav-idx">01</span><span class="nav-label">General</span>
+                    </button>
+                    <button class="settings-nav-item" data-target="section-engine" onclick="settingsShowSection('section-engine', this)">
+                        <span class="nav-idx">02</span><span class="nav-label">AI engine</span>
+                    </button>
+                    <button class="settings-nav-item" data-target="section-rules" onclick="settingsShowSection('section-rules', this)">
+                        <span class="nav-idx">03</span><span class="nav-label">Triage rules</span>
+                    </button>
+                    <button class="settings-nav-item" data-target="section-rescan" onclick="settingsShowSection('section-rescan', this)">
+                        <span class="nav-idx">04</span><span class="nav-label">Rescan</span>
+                    </button>
+                    <button class="settings-nav-item" data-target="section-accounts" onclick="settingsShowSection('section-accounts', this)">
+                        <span class="nav-idx">05</span><span class="nav-label">Accounts</span>
+                    </button>
+                </div>
+                <div class="settings-nav-foot">
+                    <span class="settings-nav-dot{% if not llm_online is defined or not llm_online %} offline{% endif %}" id="settings-nav-dot"></span>
+                    <span id="settings-nav-foot-label">{% if llm_provider is defined and llm_provider == 'ollama' %}local model active{% else %}api connected{% endif %}</span>
+                </div>
+            </nav>
+            <!-- Right Pane (HTMX loads content here) -->
+            <div class="settings-main">
+                <div id="settings-modal-body" class="settings-modal-body">
+                    <div class="settings-modal-loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scan progress bar -->
+    <div id="scan-progress" class="scan-progress hidden">
+        <div class="scan-progress-info">
+            <svg class="spin" viewBox="0 0 24 24" width="16" height="16"><path d="M21 12a9 9 0 1 1-6.219-8.56" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span id="scan-progress-text">Scanning...</span>
+        </div>
+        <div class="scan-progress-bar">
+            <div class="scan-progress-fill" id="scan-progress-fill"></div>
+        </div>
+        <button id="scan-cancel-btn" class="scan-cancel-btn" onclick="cancelScan()">Stop</button>
+    </div>
+
     <script src="/static/app.js"></script>
     <script>
+        function cancelScan() {
+            fetch('/triage/cancel', { method: 'POST' });
+            document.getElementById('scan-progress').classList.add('hidden');
+        }
+
+        function settingsShowSection(sectionId, navBtn) {
+            document.querySelectorAll('.settings-section-pane').forEach(function(el) { el.classList.remove('active'); });
+            document.querySelectorAll('.settings-nav-item').forEach(function(el) { el.classList.remove('active'); });
+            var section = document.getElementById(sectionId);
+            if (section) section.classList.add('active');
+            if (navBtn) navBtn.classList.add('active');
+        }
+
         function toggleAccount(btn, accountId) {
             var currentTab = '{{ selected_tab if selected_tab is defined else "important" }}';
             var url = '/?tab=' + currentTab;
-            // Clicking the same account again clears the filter (back to all accounts)
             var currentAccountId = new URLSearchParams(window.location.search).get('account_id');
             if (currentAccountId !== String(accountId)) {
                 url += '&account_id=' + accountId;
@@ -139,25 +228,130 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            var wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            var ws = new WebSocket(wsProtocol + window.location.host + '/ws');
-            ws.onmessage = function(event) {
-                var data = JSON.parse(event.data);
-                if (data.type === 'email_triaged') {
-                    location.reload();
-                }
-            };
-            ws.onclose = function() {
-                setTimeout(function() { location.reload(); }, 5000);
-            };
-
-            // Ctrl+K search focus
             document.addEventListener('keydown', function(ev) {
-                if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
+                if (ev.key === 'Escape') {
+                    var modal = document.getElementById('settings-modal');
+                    if (modal && !modal.classList.contains('hidden')) {
+                        modal.classList.add('hidden');
+                    }
+                } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
                     ev.preventDefault();
                     document.getElementById('search-input').focus();
                 }
             });
+
+            var scanProgress = document.getElementById('scan-progress');
+            var scanFill = document.getElementById('scan-progress-fill');
+            var scanText = document.getElementById('scan-progress-text');
+            var llmDot = document.getElementById('llm-dot');
+            var llmLabel = document.getElementById('llm-label');
+            var llmUnloadBtn = document.getElementById('llm-unload-btn');
+            var currentProvider = '{{ llm_provider if llm_provider is defined else "ollama" }}';
+            var scanMode = 'scan';
+
+            function applyLLMColor(state) {
+                llmDot.classList.remove('loaded', 'scanning');
+                llmDot.style.background = '';
+                llmDot.style.animation = '';
+                if (state === 'loaded') {
+                    llmDot.style.background = 'var(--amber)';
+                    llmDot.style.animation = 'none';
+                } else if (state === 'scanning') {
+                    llmDot.classList.add('scanning');
+                } else if (state === 'online') {
+                    llmDot.style.background = 'var(--ash)';
+                    llmDot.style.animation = 'none';
+                } else {
+                    llmDot.style.background = 'var(--ash)';
+                    llmDot.style.animation = 'none';
+                }
+            }
+
+            var wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            var ws = new WebSocket(wsProtocol + window.location.host + '/ws');
+
+            ws.onmessage = function(event) {
+                var data = JSON.parse(event.data);
+
+                if (data.type === 'scan_start') {
+                    scanProgress.classList.remove('hidden');
+                    scanFill.style.width = '0%';
+                    scanMode = data.mode || 'scan';
+                    var label = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
+                    scanText.textContent = label + '... 0 / ' + data.total;
+                    applyLLMColor('scanning');
+                    llmLabel.textContent = 'Scanning';
+                }
+
+                if (data.type === 'scan_progress') {
+                    var pct = data.total > 0 ? Math.round((data.done / data.total) * 100) : 0;
+                    scanFill.style.width = pct + '%';
+                    var progressLabel = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
+                    scanText.textContent = progressLabel + '... ' + data.done + ' / ' + data.total;
+                }
+
+                if (data.type === 'scan_end') {
+                    scanProgress.classList.add('hidden');
+                    scanFill.style.width = '0%';
+                    applyLLMColor('loaded');
+                    var label = currentProvider === 'ollama' ? 'Ollama' : 'API';
+                    llmLabel.textContent = label + ' Loaded';
+                    setTimeout(function() { location.reload(); }, 2000);
+                }
+
+                if (data.type === 'ollama_status') {
+                    if (data.status === 'unloaded') {
+                        applyLLMColor('online');
+                        llmLabel.textContent = currentProvider === 'ollama' ? 'Ollama Online' : 'API Online';
+                    }
+                    if (data.status === 'loaded') {
+                        applyLLMColor('loaded');
+                        llmLabel.textContent = currentProvider === 'ollama' ? 'Ollama Loaded' : 'API Loaded';
+                    }
+                }
+            };
+
+            ws.onclose = function() {
+                scanProgress.classList.add('hidden');
+                applyLLMColor('online');
+                setTimeout(function() { location.reload(); }, 5000);
+            };
+
+            function updateLLMStatusUI(status) {
+                var provider = status.provider || currentProvider;
+                var label = provider === 'ollama' ? 'Ollama' : 'API';
+                if (status.online && status.loaded) {
+                    applyLLMColor('loaded');
+                    llmLabel.textContent = label + ' Loaded';
+                } else if (status.online) {
+                    applyLLMColor('online');
+                    llmLabel.textContent = label + ' Online';
+                } else {
+                    applyLLMColor('offline');
+                    llmLabel.textContent = label + ' Offline';
+                }
+            }
+
+            setInterval(function() {
+                fetch('/api/llm/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(status) { updateLLMStatusUI(status); })
+                    .catch(function() {});
+            }, 5000);
+
+            fetch('/api/scan-status')
+                .then(function(r) { return r.json(); })
+                .then(function(state) {
+                    if (state.running && state.total > 0) {
+                        scanProgress.classList.remove('hidden');
+                        var pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
+                        scanFill.style.width = pct + '%';
+                        scanText.textContent = 'Scanning... ' + state.done + ' / ' + state.total;
+                        applyLLMColor('scanning');
+                        llmLabel.textContent = 'Scanning';
+                    }
+                })
+                .catch(function() {});
         });
     </script>
 

@@ -68,7 +68,7 @@ def check_env_file():
     return env_path
 
 def check_ollama():
-    """Check if Ollama is running"""
+    """Check if Ollama is running (only relevant if using Ollama provider)"""
     try:
         import httpx
     except ImportError:
@@ -85,8 +85,31 @@ def check_ollama():
             return False
     except Exception as e:
         print(f"⚠ Could not connect to Ollama at {ollama_host}: {e}")
-        print("  Triage will fail gracefully until Ollama is running")
+        print("  If using Ollama, triage will fail until it's running")
+        print("  If using OpenAI/OpenRouter, this warning can be ignored")
         return False
+
+
+def check_llm_provider():
+    """Check LLM provider connectivity based on configuration"""
+    try:
+        import sqlite3
+        db_path = Path("data/inboxzen.db")
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.execute("SELECT value FROM settings WHERE key='llm_provider'")
+            row = cursor.fetchone()
+            provider = row[0] if row else "ollama"
+            conn.close()
+
+            if provider == "ollama":
+                return check_ollama()
+            elif provider in ("openai", "openrouter"):
+                print(f"✓ Using {provider} as LLM provider (API key required)")
+                return True
+    except Exception:
+        pass
+    return check_ollama()
 
 def start_server():
     """Start the FastAPI server"""
@@ -121,8 +144,8 @@ def main():
     # Check .env file
     check_env_file()
     
-    # Check Ollama (optional but recommended)
-    check_ollama()
+    # Check LLM provider connectivity
+    check_llm_provider()
     
     # Start server
     start_server()
