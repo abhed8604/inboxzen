@@ -9,12 +9,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // Email card click — select + load detail
     // ----------------------------------------
     window.selectEmail = function(emailId) {
-        var cards = emailList.querySelectorAll('.email-card');
-        cards.forEach(function(c) { c.classList.remove('selected'); });
+        if (emailList) {
+            var cards = emailList.querySelectorAll('.email-card');
+            cards.forEach(function(c) { c.classList.remove('selected'); });
 
-        var card = emailList.querySelector('[data-email-id="' + emailId + '"]');
-        if (card) {
-            card.classList.add('selected');
+            var card = emailList.querySelector('[data-email-id="' + emailId + '"]');
+            if (card) {
+                card.classList.add('selected');
+            }
         }
     };
 

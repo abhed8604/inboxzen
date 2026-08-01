@@ -77,22 +77,20 @@ def _plain_to_html(text: str) -> str:
 
 def _resolve_cid_refs(html: str, images: dict) -> str:
     """Replace cid: references in HTML with data: URIs from collected image parts."""
-    if not images:
+    if not images or 'cid:' not in html:
         return html
 
-    def replace_cid(m):
-        cid = m.group(1)
-        if cid in images:
-            mime, data = images[cid]
-            return f'src="data:{mime};base64,{data}"'
-        return m.group(0)
+    for cid, (mime, b64data) in images.items():
+        data_uri = f"data:{mime};base64,{b64data}"
+        html = html.replace(f'cid:{cid}', data_uri)
+        html = html.replace(f'cid:&lt;{cid}&gt;', data_uri)
 
-    return re.sub(r'src\s*=\s*["\']cid:([^"\']+)["\']', replace_cid, html, flags=re.IGNORECASE)
+    return html
 
 
 _PROXY_IMG_PATTERN = re.compile(
-    r'(<img\s[^>]*?)src\s*=\s*["\']?(https?://[^"\'>\s]+)["\']?',
-    re.IGNORECASE,
+    r'(<img\b[^>]*?\b)src=["\'](https?://[^"\']+)["\']',
+    re.IGNORECASE
 )
 
 
@@ -106,50 +104,67 @@ def _rewrite_image_urls(html: str) -> str:
     return _PROXY_IMG_PATTERN.sub(_replace, html)
 
 
-def _extract_body(payload: dict) -> tuple[str, str, dict]:
-    """Extract HTML, plain text bodies, and inline images from Gmail payload."""
+def _extract_body_and_attachments(payload: dict) -> tuple[str, str, dict, list]:
+    """Extract HTML, plain text bodies, inline images, and file attachments from Gmail payload."""
     html_body = ""
     plain_body = ""
     images = {}
+    attachments = []
 
-    parts = payload.get("parts", [])
-    if not parts:
-        mime = payload.get("mimeType", "")
-        data = payload.get("body", {}).get("data", "")
-        if data:
-            decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-            if mime == "text/html":
-                html_body = decoded
-            elif mime == "text/plain":
-                plain_body = decoded
-        return html_body, plain_body, images
-
-    for part in parts:
+    def _walk_part(part: dict):
+        nonlocal html_body, plain_body
         mime = part.get("mimeType", "")
-        data = part.get("body", {}).get("data", "")
+        body_data = part.get("body", {})
+        data = body_data.get("data", "")
+        att_id = body_data.get("attachmentId", "")
+        filename = part.get("filename", "")
+        size = body_data.get("size", 0)
 
-        if mime == "text/html" and data and not html_body:
+        # Look in headers for filename if empty on part
+        if not filename:
+            for h in part.get("headers", []):
+                hname = h.get("name", "").lower()
+                hval = h.get("value", "")
+                if hname in ("content-disposition", "content-type"):
+                    m = re.search(r'(?:filename|name)\*?=(?:[^\'"]*\'[^\'"]*\')?["\']?([^"\';\r\n]+)["\']?', hval, re.I)
+                    if m:
+                        filename = m.group(1).strip()
+                        break
+
+        cid = ""
+        disposition = ""
+        for h in part.get("headers", []):
+            hname = h.get("name", "").lower()
+            if hname == "content-id":
+                cid = h["value"].strip("<>")
+            elif hname == "content-disposition":
+                disposition = h["value"].lower()
+
+        is_att = bool(filename or att_id or "attachment" in disposition)
+
+        if is_att and att_id and not mime.startswith("multipart/"):
+            if mime.startswith("image/") and cid and data and not filename and "attachment" not in disposition:
+                images[cid] = (mime, data)
+            else:
+                default_name = "document.pdf" if mime == "application/pdf" else "attachment"
+                attachments.append({
+                    "filename": filename or default_name,
+                    "mime_type": mime or "application/octet-stream",
+                    "size": size,
+                    "attachment_id": att_id
+                })
+        elif mime == "text/html" and data and not html_body:
             html_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
         elif mime == "text/plain" and data and not plain_body:
             plain_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-        elif mime.startswith("image/") and data:
-            cid = ""
-            for h in part.get("headers", []):
-                if h["name"].lower() == "content-id":
-                    cid = h["value"].strip("<>")
-                    break
-            if cid:
-                images[cid] = (mime, data)
+        elif mime.startswith("image/") and data and cid:
+            images[cid] = (mime, data)
 
-        if "parts" in part:
-            sub_html, sub_plain, sub_images = _extract_body(part)
-            if sub_html and not html_body:
-                html_body = sub_html
-            if sub_plain and not plain_body:
-                plain_body = sub_plain
-            images.update(sub_images)
+        for sub in part.get("parts", []):
+            _walk_part(sub)
 
-    return html_body, plain_body, images
+    _walk_part(payload)
+    return html_body, plain_body, images, attachments
 
 async def sync_account(account_id: int, db: AsyncSession):
     """Sync emails for a specific Gmail account"""
@@ -219,16 +234,16 @@ async def sync_account(account_id: int, db: AsyncSession):
                 except Exception:
                     pass
             
-            # Get snippet and body
+            # Get snippet, body, and attachments
             snippet = msg.get("snippet", "")
-            html_body, plain_body, images = _extract_body(msg["payload"])
+            html_body, plain_body, images, attachments_data = _extract_body_and_attachments(msg["payload"])
 
             if html_body:
                 body = _sanitize_html(html_body)
                 body = _resolve_cid_refs(body, images)
                 body = _rewrite_image_urls(body)
             elif plain_body:
-                body = _plain_to_html(plain_body)
+                body = html_lib.escape(plain_body).replace('\n', '<br>')
             else:
                 body = snippet
             
@@ -244,8 +259,21 @@ async def sync_account(account_id: int, db: AsyncSession):
                 is_read="UNREAD" not in msg.get("labelIds", []),
                 is_archived="TRASH" in msg.get("labelIds", [])
             )
-            
             db.add(email)
+            await db.flush()
+
+            # Create attachment records
+            for att in attachments_data:
+                if att.get("attachment_id"):
+                    attachment = Attachment(
+                        email_id=email.id,
+                        filename=att["filename"],
+                        mime_type=att["mime_type"],
+                        size=att["size"],
+                        gmail_attachment_id=att["attachment_id"]
+                    )
+                    db.add(attachment)
+
             new_emails.append(email)
         
         await db.commit()
@@ -256,6 +284,65 @@ async def sync_account(account_id: int, db: AsyncSession):
     except Exception as e:
         logger.error("Failed to sync account %s: %s", account.email, e)
         return []
+
+
+async def get_attachment_data(account: Account, gmail_id: str, attachment_id: str) -> bytes:
+    """Fetch raw attachment bytes from Gmail API."""
+    service = get_gmail_service(account.access_token, account.refresh_token)
+    res = await asyncio.to_thread(
+        service.users().messages().attachments().get(
+            userId="me",
+            messageId=gmail_id,
+            id=attachment_id
+        ).execute
+    )
+    data = res.get("data", "")
+    if data:
+        return base64.urlsafe_b64decode(data)
+    return b""
+
+
+async def sync_email_attachments(email: Email, db: AsyncSession) -> list:
+    """On-demand backfill: Fetch email payload from Gmail API and save attachments if missing for existing email."""
+    if not email or not email.account or not email.gmail_id:
+        return []
+
+    if email.attachments:
+        return email.attachments
+
+    account = email.account
+    try:
+        service = get_gmail_service(account.access_token, account.refresh_token)
+        msg = await asyncio.to_thread(
+            service.users().messages().get(
+                userId="me",
+                id=email.gmail_id,
+                format="full"
+            ).execute
+        )
+        _, _, _, attachments_data = _extract_body_and_attachments(msg.get("payload", {}))
+        
+        new_atts = []
+        for att in attachments_data:
+            if att.get("attachment_id"):
+                attachment = Attachment(
+                    email_id=email.id,
+                    filename=att["filename"],
+                    mime_type=att["mime_type"],
+                    size=att["size"],
+                    gmail_attachment_id=att["attachment_id"]
+                )
+                db.add(attachment)
+                new_atts.append(attachment)
+
+        if new_atts:
+            await db.commit()
+            await db.refresh(email, attribute_names=["attachments"])
+        return email.attachments
+    except Exception as e:
+        logger.error("Failed to sync attachments for email %s: %s", email.id, e)
+        return []
+
 
 async def sync_all_accounts(db: AsyncSession):
     """Sync emails for all connected accounts"""
@@ -302,36 +389,4 @@ async def mark_email_read(email_id: int, db: AsyncSession):
         
     except Exception as e:
         logger.error("Failed to mark email as read: %s", e)
-        return False
-
-async def trash_email(email_id: int, db: AsyncSession):
-    """Move an email to trash in Gmail and update local database"""
-    result = await db.execute(select(Email).where(Email.id == email_id))
-    email = result.scalar_one_or_none()
-
-    if not email:
-        return False
-
-    account_result = await db.execute(select(Account).where(Account.id == email.account_id))
-    account = account_result.scalar_one_or_none()
-
-    if not account:
-        return False
-
-    try:
-        service = get_gmail_service(account.access_token, account.refresh_token)
-        await asyncio.to_thread(
-            service.users().messages().modify(
-                userId="me",
-                id=email.gmail_id,
-                body={"removeLabelIds": ["INBOX"], "addLabelIds": ["TRASH"]}
-            ).execute
-        )
-
-        email.is_archived = True
-        await db.commit()
-        return True
-
-    except Exception as e:
-        logger.error("Failed to trash email: %s", e)
         return False

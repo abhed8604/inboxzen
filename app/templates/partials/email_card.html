@@ -29,7 +29,7 @@
      hx-swap="innerHTML">
     <div class="ei-main">
         <div class="ei-top">
-            <span class="dot-sm acct-dot" style="background:{{ email.account.color if email.account else 'var(--ash)' }}" title="{{ email.account.display_name if email.account else '' }}"></span>
+            <span class="dot-sm acct-dot" style="background:{{ email.account.color if email.account else 'var(--ash)' }}" title="{{ email.account.email if email.account else '' }}"></span>
             <span class="ei-sender">{{ sender_name }}</span>
         </div>
         <div class="ei-summary">{{ email.summary or email.snippet or email.subject }}</div>

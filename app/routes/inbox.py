@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import Email, Account, Settings
 from app.utils import _toast, _get_llm_ctx, get_selected_model
-from app.services.gmail_sync import sync_all_accounts, mark_email_read, trash_email
+from app.services.gmail_sync import sync_all_accounts, mark_email_read
 from app.services.triage_runner import run_triage_scan, request_cancel, _scan_state
 from app.services.llm_triage import scan_email, load_custom_rules, TriageRateLimit
 from app.services.llm_providers import get_provider
@@ -37,7 +37,7 @@ def _email_query(account_id: Optional[int] = None, q: Optional[str] = None, impo
     """Build the base email query with optional filters."""
     stmt = (
         select(Email)
-        .options(selectinload(Email.account))
+        .options(selectinload(Email.account), selectinload(Email.attachments))
         .where(Email.is_archived == False)
     )
     if account_id:
@@ -130,6 +130,9 @@ async def inbox(
     unread_count = sum(1 for e in all_emails if not e.is_read)
     important_count = sum(1 for e in all_emails if (e.relevance_score or 0) >= IMPORTANT_SCORE)
     selected_email = emails[0] if emails else None
+    if selected_email and not selected_email.attachments:
+        from app.services.gmail_sync import sync_email_attachments
+        await sync_email_attachments(selected_email, db)
 
     theme_result = await db.execute(select(Settings).where(Settings.key == "theme"))
     theme_setting = theme_result.scalar_one_or_none()
@@ -165,12 +168,18 @@ async def email_detail(
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
-        select(Email).options(selectinload(Email.account)).where(Email.id == email_id)
+        select(Email)
+        .options(selectinload(Email.account), selectinload(Email.attachments))
+        .where(Email.id == email_id)
     )
     email = result.scalar_one_or_none()
 
     if not email:
         return HTMLResponse("<p>Email not found</p>", status_code=404)
+
+    if not email.attachments:
+        from app.services.gmail_sync import sync_email_attachments
+        await sync_email_attachments(email, db)
 
     if not email.is_read:
         await mark_email_read(email_id, db)
@@ -189,6 +198,46 @@ async def email_detail(
     )
 
 
+@router.get("/inbox/{email_id}/attachment/{attachment_id}")
+async def download_attachment(
+    email_id: int,
+    attachment_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    from app.models import Attachment
+    from app.services.gmail_sync import get_attachment_data
+    from urllib.parse import quote
+
+    result = await db.execute(
+        select(Attachment)
+        .options(selectinload(Attachment.email).selectinload(Email.account))
+        .where(
+            Attachment.id == attachment_id,
+            Attachment.email_id == email_id
+        )
+    )
+    attachment = result.scalar_one_or_none()
+    if not attachment or not attachment.email or not attachment.email.account:
+        return HTMLResponse("<p>Attachment not found</p>", status_code=404)
+
+    try:
+        content = await get_attachment_data(
+            attachment.email.account,
+            attachment.email.gmail_id,
+            attachment.gmail_attachment_id
+        )
+        safe_filename = quote(attachment.filename or "attachment")
+        disposition = "inline" if attachment.mime_type in ("application/pdf", "image/jpeg", "image/png", "image/gif", "text/plain") else "attachment"
+        return Response(
+            content=content,
+            media_type=attachment.mime_type or "application/octet-stream",
+            headers={"Content-Disposition": f'{disposition}; filename="{safe_filename}"'}
+        )
+    except Exception as e:
+        logger.error("Failed to download attachment %s: %s", attachment_id, e)
+        return HTMLResponse("<p>Failed to download attachment</p>", status_code=500)
+
+
 @router.get("/inbox/{email_id}/body")
 async def email_body(email_id: int, theme: str = Query("dark"), db: AsyncSession = Depends(get_db)):
     theme = theme.strip().lower() if theme else "dark"
@@ -198,11 +247,27 @@ async def email_body(email_id: int, theme: str = Query("dark"), db: AsyncSession
         return HTMLResponse("", status_code=404)
 
     if theme == "dark":
-        base_style = "body{margin:0;padding:8px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#e0e0e0;background:#0a0a0f;}img{max-width:100%;height:auto;}a{color:#7eb8ff;}table{border-collapse:collapse;}td,th{padding:4px 8px;}"
+        base_style = "body{margin:0;padding:8px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#e0e0e0;background:#0a0a0f;}img{max-width:100%;height:auto;}a{color:#7eb8ff;cursor:pointer;}table{border-collapse:collapse;}td,th{padding:4px 8px;}"
     else:
-        base_style = "body{margin:0;padding:8px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#2B2620;background:#FBF6EA;}img{max-width:100%;height:auto;}a{color:#3b6dcc;}table{border-collapse:collapse;}td,th{padding:4px 8px;}"
+        base_style = "body{margin:0;padding:8px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#2B2620;background:#FBF6EA;}img{max-width:100%;height:auto;}a{color:#3b6dcc;cursor:pointer;}table{border-collapse:collapse;}td,th{padding:4px 8px;}"
 
-    html = f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>{base_style}</style></head><body>{email.body}</body></html>'
+    click_script = """<script>
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('a').forEach(function(a) {
+    if (!a.getAttribute('target')) { a.setAttribute('target', '_blank'); }
+    if (!a.getAttribute('rel')) { a.setAttribute('rel', 'noopener noreferrer'); }
+  });
+});
+document.addEventListener('click', function(e) {
+  var a = e.target.closest('a');
+  if (a && a.href && !a.href.startsWith('javascript:')) {
+    e.preventDefault();
+    window.open(a.href, '_blank', 'noopener,noreferrer');
+  }
+}, true);
+</script>"""
+
+    html = f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base target="_blank"><style>{base_style}</style>{click_script}</head><body>{email.body}</body></html>'
 
     return HTMLResponse(
         content=html,
@@ -282,13 +347,6 @@ async def ollama_unload(db: AsyncSession = Depends(get_db)):
         return _toast("Model unloaded from GPU.")
     return _toast("Failed to unload model.", "error")
 
-
-@router.post("/inbox/{email_id}/archive")
-async def archive(email_id: int, db: AsyncSession = Depends(get_db)):
-    success = await trash_email(email_id, db)
-    if not success:
-        return _toast("Failed to archive email", "error")
-    return HTMLResponse("")
 
 
 @router.post("/inbox/{email_id}/rescan")

@@ -35,7 +35,7 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         # Import models here to ensure they are registered with Base
-        from app.models import Account, Email, Settings
+        from app.models import Account, Email, Attachment, Settings
         await conn.run_sync(Base.metadata.create_all)
 
         # Migration: add new columns if missing

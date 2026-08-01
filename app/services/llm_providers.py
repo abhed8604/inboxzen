@@ -163,7 +163,7 @@ class OpenAIProvider(LLMProvider):
     name = "openai"
 
     def __init__(self, api_key: str):
-        self.api_key = api_key
+        self.api_key = (api_key or "").strip()
         self.base_url = "https://api.openai.com/v1"
 
     def _headers(self) -> dict:
@@ -181,6 +181,8 @@ class OpenAIProvider(LLMProvider):
         return LLMStatus(online=False)
 
     async def generate(self, prompt: str, model: str) -> str:
+        if not self.api_key:
+            raise RuntimeError("OpenAI API key is missing. Please configure your API key in Settings.")
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
@@ -197,16 +199,16 @@ class OpenAIProvider(LLMProvider):
 
     async def list_models(self) -> list[str]:
         if not self.api_key:
-            return []
+            return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-preview", "o3-mini"]
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(f"{self.base_url}/models", headers=self._headers())
                 if r.status_code == 200:
                     data = r.json().get("data", [])
-                    return sorted([m["id"] for m in data if "gpt" in m["id"].lower()])
+                    return sorted([m["id"] for m in data if "gpt" in m["id"].lower() or "o1" in m["id"].lower() or "o3" in m["id"].lower()])
         except Exception:
             pass
-        return []
+        return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-preview", "o3-mini"]
 
     def supports_parallel(self) -> bool:
         return True
@@ -216,15 +218,17 @@ class OpenRouterProvider(LLMProvider):
     name = "openrouter"
 
     def __init__(self, api_key: str):
-        self.api_key = api_key
+        self.api_key = (api_key or "").strip()
         self.base_url = "https://openrouter.ai/api/v1"
 
     def _headers(self) -> dict:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
+        headers = {
             "HTTP-Referer": "http://localhost:8000",
             "X-Title": "InboxZen",
         }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     async def check_status(self, model: str) -> LLMStatus:
         if not self.api_key:
@@ -238,6 +242,8 @@ class OpenRouterProvider(LLMProvider):
         return LLMStatus(online=False)
 
     async def generate(self, prompt: str, model: str) -> str:
+        if not self.api_key:
+            raise RuntimeError("OpenRouter API key is missing. Please configure your API key in Settings.")
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
@@ -253,8 +259,6 @@ class OpenRouterProvider(LLMProvider):
             return resp.json()["choices"][0]["message"]["content"].strip()
 
     async def list_models(self) -> list[str]:
-        if not self.api_key:
-            return []
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(f"{self.base_url}/models", headers=self._headers())
@@ -266,8 +270,6 @@ class OpenRouterProvider(LLMProvider):
         return []
 
     async def list_models_detailed(self) -> list[dict]:
-        if not self.api_key:
-            return []
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 r = await client.get(f"{self.base_url}/models", headers=self._headers())
@@ -309,7 +311,8 @@ async def get_provider(db=None) -> LLMProvider:
             result = await db.execute(select(Settings).where(Settings.key == key_name))
             setting = result.scalar_one_or_none()
             fallback_key = OPENAI_API_KEY if provider_name == "openai" else OPENROUTER_API_KEY
-            api_key = (setting.value if setting else "") or fallback_key
+            db_val = (setting.value if setting else "").strip()
+            api_key = db_val if db_val else (fallback_key or "").strip()
 
     if provider_name == "openai":
         return OpenAIProvider(api_key=api_key)

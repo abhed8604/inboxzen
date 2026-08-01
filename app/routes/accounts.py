@@ -55,7 +55,7 @@ async def oauth2callback(code: str = None, state: str = None, db: AsyncSession =
             result = await db.execute(select(Account))
             accounts = result.scalars().all()
             color = ACCOUNT_COLORS[len(accounts) % len(ACCOUNT_COLORS)]
-            display_name = email.split("@")[0].replace(".", " ").title()
+            display_name = email
             
             account = Account(
                 email=email,

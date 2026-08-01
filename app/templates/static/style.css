@@ -819,11 +819,14 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 .d-sender-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 28px;
+  gap: 10px;
+  padding: 14px 28px;
   margin-bottom: 0;
-  padding-top: 14px;
-  padding-bottom: 14px;
+}
+
+.d-sender-info {
+  display: flex;
+  flex-direction: column;
 }
 
 .d-sender-avatar {
@@ -861,14 +864,13 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   flex-shrink: 0;
 }
 
-/* Action buttons */
+/* Action buttons (shifted to extreme right) */
 .actions-row {
   display: flex;
+  align-items: center;
   gap: 6px;
-  padding: 0 28px;
-  margin-bottom: 0;
-  padding-top: 4px;
-  padding-bottom: 18px;
+  margin-left: auto;
+  padding: 0;
   flex-shrink: 0;
 }
 
@@ -895,16 +897,6 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 .icon-btn svg {
   width: 13px;
   height: 13px;
-}
-
-.actions-row .icon-btn:nth-child(2)::after {
-  content: '';
-  position: absolute;
-  right: -5px;
-  top: 4px;
-  bottom: 4px;
-  width: 1px;
-  background: var(--line);
 }
 
 /* Zen Summary card */
@@ -938,8 +930,8 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 }
 
 .zen-heading svg {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
   color: var(--signal);
 }
 
@@ -1056,6 +1048,112 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 .link-chip:hover {
   border-color: var(--accent-border);
   background: var(--accent-dim);
+  color: var(--signal);
+}
+
+/* Attachments Section */
+.attachments-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.attachments-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ash);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.attachments-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  text-decoration: none;
+  color: var(--text-primary);
+  max-width: 280px;
+  transition: all 0.18s var(--ease);
+}
+
+.attachment-chip:hover {
+  border-color: var(--signal);
+  background: var(--g-800);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.att-icon-badge {
+  flex-shrink: 0;
+}
+
+.att-ext-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 5px;
+  letter-spacing: 0.5px;
+  background: var(--g-800);
+  color: var(--ash);
+  border: 1px solid var(--line);
+}
+
+.att-ext-label.pdf { background: rgba(226, 87, 76, 0.15); color: var(--red); border-color: rgba(226, 87, 76, 0.3); }
+.att-ext-label.img { background: rgba(127, 232, 192, 0.15); color: var(--signal); border-color: rgba(127, 232, 192, 0.3); }
+.att-ext-label.doc { background: rgba(61, 111, 196, 0.15); color: #60A5FA; border-color: rgba(96, 165, 250, 0.3); }
+.att-ext-label.xls { background: rgba(16, 185, 129, 0.15); color: #34D399; border-color: rgba(52, 211, 153, 0.3); }
+.att-ext-label.zip { background: rgba(227, 168, 87, 0.15); color: var(--amber); border-color: rgba(227, 168, 87, 0.3); }
+
+.att-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.att-filename {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--bone);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.att-filesize {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ash-dim);
+  margin-top: 1px;
+}
+
+.att-download-icon {
+  color: var(--ash);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.18s var(--ease);
+}
+
+.attachment-chip:hover .att-download-icon {
+  color: var(--signal);
 }
 
 .link-chip svg {
@@ -1094,26 +1192,15 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ------------------------------------------------------------
-   9. RESPONSIVE
+   9. DESKTOP LAYOUT & RESPONSIVE
    ------------------------------------------------------------ */
 
-@media (max-width: 1200px) {
-  .app-layout {
-    grid-template-columns: var(--sidebar-width) 1fr;
-  }
-
-  .email-detail-panel {
-    display: none;
-  }
-}
-
-@media (max-width: 768px) {
-  .app-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar { display: none; }
-  .email-list-panel { border-right: none; }
+/* Desktop-only fixed 3-column layout */
+.app-layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) var(--list-width) 1fr;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* ------------------------------------------------------------
@@ -1538,10 +1625,36 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 
 /* ── Right Main Pane ───────────────────────────── */
 
+/* ── Smooth Theme Transitions & View Transition API ── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body,
+.sidebar,
+.email-list-panel,
+.email-detail-panel,
+.settings-modal-card,
+.settings-nav,
+.settings-main,
+.email-card,
+.settings-theme-card,
+.settings-input,
+.settings-select,
+.settings-seg-btn,
+.settings-btn {
+  transition: background-color 0.3s var(--ease), color 0.3s var(--ease), border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+
 .settings-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .settings-topbar {
@@ -1642,6 +1755,7 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  padding: 24px 28px 28px;
 }
 
 .settings-content::-webkit-scrollbar { width: 8px; }
@@ -1656,6 +1770,126 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+
+/* ── API Key System & Model UI Components (Tab 02) ── */
+
+.key-card-container {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.key-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.key-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.key-status-badge.db {
+  background: rgba(127, 232, 192, 0.12);
+  color: var(--signal);
+  border: 1px solid rgba(127, 232, 192, 0.3);
+}
+
+.key-status-badge.env {
+  background: rgba(227, 168, 87, 0.12);
+  color: var(--amber);
+  border: 1px solid rgba(227, 168, 87, 0.3);
+}
+
+.key-status-badge.none {
+  background: rgba(130, 136, 154, 0.12);
+  color: var(--ash);
+  border: 1px solid var(--border);
+}
+
+.api-key-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.api-key-input-wrapper input {
+  padding-right: 42px;
+}
+
+.key-toggle-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.key-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.key-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.settings-btn-secondary {
+  background: var(--g-800);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.settings-btn-secondary:hover {
+  background: var(--card);
+  border-color: var(--ash-dim);
+}
+
+.model-quick-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.model-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  background: var(--g-800);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.model-pill:hover {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: rgba(127, 232, 192, 0.08);
 }
 
 /* ── Field Blocks ──────────────────────────────── */
@@ -1735,11 +1969,17 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   font-weight: 500;
 }
 
-.swatch-dark { background: var(--card); }
+.swatch-dark {
+  background: #14171F;
+  border: 1px solid #282F3E;
+}
 .swatch-dark span { background: #2A3040; }
 .swatch-dark span.swatch-acc { background: var(--signal); width: 40%; }
 
-.swatch-light { background: #EFEDE6; }
+.swatch-light {
+  background: #EFEDE6;
+  border: 1px solid #DDD8CD;
+}
 .swatch-light span { background: #D8D5CB; }
 .swatch-light span.swatch-acc { background: #1C9E75; width: 40%; }
 
@@ -1851,16 +2091,76 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   background: rgba(226,87,76,0.08);
 }
 
-/* ── Code Editor (Triage Rules) ────────────────── */
+/* ── Code Editor Card (Triage Rules Workspace) ───── */
+
+.prompt-editor-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 280px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.2s ease;
+}
+
+.prompt-editor-card:focus-within {
+  border-color: rgba(127, 232, 192, 0.35);
+}
+
+.prompt-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.prompt-file-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--g-900);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.prompt-file-tab .file-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 8px rgba(127, 232, 192, 0.5);
+}
+
+.prompt-editor-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prompt-meta-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
 
 .settings-editor {
   display: flex;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  overflow: hidden;
-  background: var(--g-800);
+  background: var(--g-900);
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 .settings-editor-gutter {
@@ -1868,20 +2168,22 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   font-size: 12px;
   line-height: 1.65;
   color: var(--ash-dim);
-  background: var(--card);
-  padding: 14px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 14px 10px 14px 14px;
   text-align: right;
   user-select: none;
   border-right: 1px solid var(--border);
-  min-width: 34px;
+  min-width: 44px;
   white-space: pre;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .settings-editor textarea {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
   line-height: 1.65;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: transparent;
   border: none;
   outline: none;
@@ -1890,23 +2192,38 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   flex: 1;
   min-height: 0;
   width: 100%;
+  white-space: pre;
+  overflow: auto;
 }
 
 .settings-editor textarea:focus {
   box-shadow: none;
 }
 
-.settings-editor-foot {
+.prompt-editor-footer {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-top: 10px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
-.settings-editor-meta {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+.prompt-routing-guide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
   color: var(--ash-dim);
+}
+
+.prompt-routing-guide .guide-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--signal);
+  flex-shrink: 0;
 }
 
 /* ── Accounts ──────────────────────────────────── */

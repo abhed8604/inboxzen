@@ -1,7 +1,7 @@
 {% set score = email.relevance_score|int if email.relevance_score is defined and email.relevance_score is not none else 0 %}
 {% set sender_name = email.sender.split('<')[0].strip() if '<' in email.sender else email.sender %}
 {% set sender_email = email.sender.split('<')[1].split('>')[0] if '<' in email.sender else '' %}
-{% set account_label = email.account.display_name if email.account else '' %}
+{% set account_label = email.account.email if email.account else '' %}
 {% set sender_initial = sender_name[:1]|upper if sender_name else '?' %}
 
 {# Score ring color tiers #}
@@ -29,7 +29,7 @@
 
     <div class="d-sender-row">
         <div class="d-sender-avatar" style="border-color:{{ email.account.color if email.account else 'var(--line)' }};color:{{ email.account.color if email.account else 'var(--signal)' }}">{{ sender_initial }}</div>
-        <div>
+        <div class="d-sender-info">
             <div class="d-sender-name">{{ sender_name }}</div>
             <div class="d-sender-email">
                 {% if sender_email %}
@@ -39,32 +39,23 @@
                 <span>{{ account_label }}</span>
             </div>
         </div>
-    </div>
-
-    <div class="actions-row">
-        <button class="icon-btn" title="Star">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-        </button>
-        <button class="icon-btn" title="Rescan with AI"
-                hx-post="/inbox/{{ email.id }}/rescan"
-                hx-target="#zen-card"
-                hx-swap="outerHTML">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        </button>
-        <button class="icon-btn" title="Archive"
-                hx-post="/inbox/{{ email.id }}/archive"
-                hx-confirm="Archive this email?">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8H3v13h18V8z"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
-        </button>
-        <button class="icon-btn" title="More">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
-        </button>
+        <div class="actions-row">
+            <button class="icon-btn" title="Star">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            </button>
+            <button class="icon-btn" title="Rescan with AI"
+                    hx-post="/inbox/{{ email.id }}/rescan"
+                    hx-target="#zen-card"
+                    hx-swap="outerHTML">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+        </div>
     </div>
 
     <div id="zen-card" class="zen-card">
         <div class="zen-left">
             <div class="zen-heading">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.132 3.518 2.482 5.868 6 6-3.518.132-5.868 2.482-6 6-.132-3.518-2.482-5.868-6-6 3.518-.132 5.868-2.482 6-6z"/><path d="M5 3c.07.9.6 1.43 1.5 1.5-.9.07-1.43.6-1.5 1.5-.07-.9-.6-1.43-1.5-1.5.9-.07 1.43-.6 1.5-1.5z"/><path d="M19 16c.07.9.6 1.43 1.5 1.5-.9.07-1.43.6-1.5 1.5-.07-.9-.6-1.43-1.5-1.5.9-.07 1.43-.6 1.5-1.5z"/></svg>
                 <span>Zen Summary</span>
             </div>
             {% if email.summary %}
@@ -91,7 +82,7 @@
         {% if email.body %}
             <iframe
                 class="email-iframe"
-                sandbox="allow-same-origin"
+                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-scripts allow-forms"
                 scrolling="no"
                 frameborder="0"
                 src="/inbox/{{ email.id }}/body?theme={{ theme|default('dark') }}"
@@ -110,6 +101,48 @@
                 {{ link|truncate(45, True, '') }}
             </a>
             {% endfor %}
+        {% endif %}
+
+        {% if email.attachments is defined and email.attachments %}
+        <div class="attachments-section">
+            <div class="attachments-heading">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                <span>Attachments ({{ email.attachments|length }})</span>
+            </div>
+            <div class="attachments-grid">
+                {% for att in email.attachments %}
+                {% set ext = att.filename.split('.')[-1].lower() if '.' in att.filename else '' %}
+                {% set size_kb = (att.size / 1024)|round(1) if att.size else 0 %}
+                {% set size_mb = (att.size / (1024 * 1024))|round(2) if att.size and att.size > 1048576 else 0 %}
+                <a href="/inbox/{{ email.id }}/attachment/{{ att.id }}" target="_blank" rel="noopener" class="attachment-chip" title="Download {{ att.filename }}">
+                    <div class="att-icon-badge">
+                        {% if ext in ['pdf'] %}
+                            <span class="att-ext-label pdf">PDF</span>
+                        {% elif ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] %}
+                            <span class="att-ext-label img">IMG</span>
+                        {% elif ext in ['doc', 'docx', 'txt', 'rtf'] %}
+                            <span class="att-ext-label doc">DOC</span>
+                        {% elif ext in ['xls', 'xlsx', 'csv'] %}
+                            <span class="att-ext-label xls">XLS</span>
+                        {% elif ext in ['zip', 'tar', 'gz', '7z', 'rar'] %}
+                            <span class="att-ext-label zip">ZIP</span>
+                        {% else %}
+                            <span class="att-ext-label file">FILE</span>
+                        {% endif %}
+                    </div>
+                    <div class="att-meta">
+                        <span class="att-filename">{{ att.filename }}</span>
+                        <span class="att-filesize">
+                            {% if size_mb > 0 %}{{ size_mb }} MB{% elif size_kb > 0 %}{{ size_kb }} KB{% else %}{{ att.size }} B{% endif %}
+                        </span>
+                    </div>
+                    <div class="att-download-icon">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
         {% endif %}
     </div>
 

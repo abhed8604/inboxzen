@@ -69,7 +69,7 @@
                 <button class="mailbox-item {% if selected_account_id == account.id %}active{% endif %}"
                         onclick="toggleAccount(this, {{ account.id }})">
                     <span class="mailbox-dot" style="background-color: {{ account.color }};"></span>
-                    <span>{{ account.display_name or account.email.split('@')[0] }}</span>
+                    <span title="{{ account.email }}">{{ account.email }}</span>
                 </button>
                 {% endfor %}
                 {% endif %}
