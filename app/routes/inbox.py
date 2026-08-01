@@ -1,23 +1,26 @@
+from datetime import datetime, timezone
+import ipaddress
+import logging
+import math
+from pathlib import Path
+import re
+import socket
+from typing import Optional
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
-from pathlib import Path
-from typing import Optional
-from datetime import datetime, timezone
-import logging
-import re
 
 from app.database import get_db
 from app.models import Email, Account, Settings
-from app.utils import _toast, _get_llm_ctx
+from app.utils import _toast, _get_llm_ctx, get_selected_model
 from app.services.gmail_sync import sync_all_accounts, mark_email_read, trash_email
-from app.services.triage_runner import (
-    run_triage_scan, request_cancel, _scan_state,
-    get_selected_model,
-)
+from app.services.triage_runner import run_triage_scan, request_cancel, _scan_state
 from app.services.llm_triage import scan_email, load_custom_rules, TriageRateLimit
 from app.services.llm_providers import get_provider
 
@@ -30,12 +33,12 @@ templates = Jinja2Templates(directory=templates_dir)
 IMPORTANT_SCORE = 70
 
 
-def _email_query(db: AsyncSession, account_id: Optional[int] = None, q: Optional[str] = None, important_only: bool = True):
+def _email_query(account_id: Optional[int] = None, q: Optional[str] = None, important_only: bool = True):
     """Build the base email query with optional filters."""
     stmt = (
         select(Email)
         .options(selectinload(Email.account))
-        .where(Email.is_deleted == False)
+        .where(Email.is_archived == False)
     )
     if account_id:
         stmt = stmt.where(Email.account_id == account_id)
@@ -60,8 +63,7 @@ def get_time_ago(dt) -> str:
     now = datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    diff = now - dt
-    seconds = int(diff.total_seconds())
+    seconds = int((now - dt).total_seconds())
     if seconds < 60:
         return "just now"
     elif seconds < 3600:
@@ -71,8 +73,7 @@ def get_time_ago(dt) -> str:
     elif seconds < 604800:
         days = seconds // 86400
         return f"{days}d" if days > 1 else "yesterday"
-    else:
-        return dt.strftime("%b %d")
+    return dt.strftime("%b %d")
 
 
 def extract_links(body_text: str) -> list:
@@ -90,6 +91,14 @@ def extract_links(body_text: str) -> list:
     return unique
 
 
+async def _fetch_inbox_emails(db: AsyncSession, account_id: Optional[int], tab: Optional[str], q: Optional[str]):
+    query = _email_query(account_id, q, important_only=(tab == "important"))
+    result = await db.execute(query)
+    emails = list(result.scalars().all())
+    emails.sort(key=lambda e: -(e.received_at.timestamp() if e.received_at else 0))
+    return emails
+
+
 @router.get("/", response_class=HTMLResponse)
 async def inbox(
     request: Request,
@@ -98,31 +107,7 @@ async def inbox(
     q: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    query = select(Email).options(selectinload(Email.account)).where(Email.is_archived == False)
-
-    if account_id:
-        query = query.where(Email.account_id == account_id)
-
-    if tab == "important":
-        query = query.where(Email.relevance_score >= IMPORTANT_SCORE)
-
-    if q:
-        search = f"%{q}%"
-        query = query.where(
-            or_(
-                Email.sender.ilike(search),
-                Email.subject.ilike(search),
-                Email.snippet.ilike(search),
-                Email.summary.ilike(search)
-            )
-        )
-
-    result = await db.execute(query)
-    emails = result.scalars().all()
-
-    emails = sorted(emails, key=lambda e: (
-        -(e.received_at.timestamp() if e.received_at else 0)
-    ))
+    emails = await _fetch_inbox_emails(db, account_id, tab, q)
 
     accounts_result = await db.execute(select(Account))
     accounts = accounts_result.scalars().all()
@@ -140,30 +125,10 @@ async def inbox(
             select(Email).where(Email.is_archived == False)
         )
         all_emails = all_emails_result.scalars().all()
-        query = select(Email).options(selectinload(Email.account)).where(Email.is_archived == False)
-        if account_id:
-            query = query.where(Email.account_id == account_id)
-        if tab == "important":
-            query = query.where(Email.relevance_score >= IMPORTANT_SCORE)
-        if q:
-            search = f"%{q}%"
-            query = query.where(
-                or_(
-                    Email.sender.ilike(search),
-                    Email.subject.ilike(search),
-                    Email.snippet.ilike(search),
-                    Email.summary.ilike(search)
-                )
-            )
-        result = await db.execute(query)
-        emails = result.scalars().all()
-        emails = sorted(emails, key=lambda e: (
-            -(e.received_at.timestamp() if e.received_at else 0)
-        ))
+        emails = await _fetch_inbox_emails(db, account_id, tab, q)
 
     unread_count = sum(1 for e in all_emails if not e.is_read)
     important_count = sum(1 for e in all_emails if (e.relevance_score or 0) >= IMPORTANT_SCORE)
-
     selected_email = emails[0] if emails else None
 
     theme_result = await db.execute(select(Settings).where(Settings.key == "theme"))
@@ -366,7 +331,7 @@ async def rescan_single(email_id: int, db: AsyncSession = Depends(get_db)):
         ring_color = '#9a9aa4'
 
     ring_r = 35
-    ring_circumf = round(2 * 3.14159265 * ring_r, 4)
+    ring_circumf = round(2 * math.pi * ring_r, 4)
     ring_offset = round(ring_circumf * (1 - score / 100), 4)
 
     html = f'''<div id="zen-card" class="zen-card">
@@ -397,17 +362,28 @@ _PROXY_ALLOWED_SCHEMES = {"http", "https"}
 _PROXY_TIMEOUT = 10.0
 
 
+def _is_safe_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in _PROXY_ALLOWED_SCHEMES or not parsed.hostname:
+            return False
+        addr_info = socket.getaddrinfo(parsed.hostname, None)
+        for _, _, _, _, sockaddr in addr_info:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 @router.get("/proxy/image")
 async def proxy_image(url: str = Query(...)):
-    import httpx as _httpx
-    from urllib.parse import urlparse
-
-    parsed = urlparse(url)
-    if parsed.scheme not in _PROXY_ALLOWED_SCHEMES:
-        return Response(status_code=400, content="Invalid scheme")
+    if not _is_safe_url(url):
+        return Response(status_code=400, content="Invalid or restricted URL")
 
     try:
-        async with _httpx.AsyncClient(timeout=_PROXY_TIMEOUT, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=_PROXY_TIMEOUT, follow_redirects=True) as client:
             resp = await client.get(url, headers={"User-Agent": "InboxZen/1.0"})
             if resp.status_code != 200:
                 return Response(status_code=resp.status_code, content="Upstream error")

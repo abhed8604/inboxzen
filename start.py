@@ -8,6 +8,9 @@ import os
 import sys
 import subprocess
 import shutil
+import sqlite3
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 def check_python_version():
@@ -17,36 +20,45 @@ def check_python_version():
         print(f"Current version: {sys.version}")
         sys.exit(1)
 
-def create_venv():
-    """Create virtual environment if it doesn't exist"""
-    venv_path = Path("venv")
-    if not venv_path.exists():
-        print("Creating virtual environment...")
-        subprocess.run([sys.executable, "-m", "venv", "venv"], check=True)
-        print("Virtual environment created successfully")
-    return venv_path
-
 def get_venv_python():
     """Get the path to the virtual environment's Python executable"""
     if sys.platform == "win32":
         return Path("venv/Scripts/python.exe")
     return Path("venv/bin/python")
 
-def get_venv_pip():
-    """Get the path to the virtual environment's pip executable"""
-    if sys.platform == "win32":
-        return Path("venv/Scripts/pip.exe")
-    return Path("venv/bin/pip")
+def is_venv_valid():
+    """Check if the virtual environment python is functional"""
+    python_path = get_venv_python()
+    if not python_path.exists():
+        return False
+    try:
+        res = subprocess.run([str(python_path), "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+def create_venv():
+    """Create virtual environment if it doesn't exist or is invalid/moved"""
+    venv_path = Path("venv")
+    if venv_path.exists() and not is_venv_valid():
+        print("Existing virtual environment is invalid or was moved. Recreating...")
+        shutil.rmtree(venv_path, ignore_errors=True)
+        
+    if not venv_path.exists():
+        print("Creating virtual environment...")
+        subprocess.run([sys.executable, "-m", "venv", "venv"], check=True)
+        print("Virtual environment created successfully")
+    return venv_path
 
 def install_dependencies():
     """Install dependencies from requirements.txt"""
-    pip_path = get_venv_pip()
-    if not pip_path.exists():
-        print("Error: pip not found in virtual environment")
+    python_path = get_venv_python()
+    if not python_path.exists():
+        print("Error: Python not found in virtual environment")
         sys.exit(1)
     
     print("Installing dependencies...")
-    subprocess.run([str(pip_path), "install", "-r", "requirements.txt"], check=True)
+    subprocess.run([str(python_path), "-m", "pip", "install", "-r", "requirements.txt"], check=True)
     print("Dependencies installed successfully")
 
 def check_env_file():
@@ -69,19 +81,14 @@ def check_env_file():
 
 def check_ollama():
     """Check if Ollama is running (only relevant if using Ollama provider)"""
-    try:
-        import httpx
-    except ImportError:
-        print("⚠ httpx not installed yet, skipping Ollama check")
-        return False
     ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     try:
-        response = httpx.get(f"{ollama_host}/api/tags", timeout=5.0)
-        if response.status_code == 200:
-            print("✓ Ollama is running")
-            return True
-        else:
-            print(f"⚠ Ollama responded with status {response.status_code}")
+        req = urllib.request.Request(f"{ollama_host}/api/tags")
+        with urllib.request.urlopen(req, timeout=5.0) as response:
+            if response.status == 200:
+                print("✓ Ollama is running")
+                return True
+            print(f"⚠ Ollama responded with status {response.status}")
             return False
     except Exception as e:
         print(f"⚠ Could not connect to Ollama at {ollama_host}: {e}")
@@ -93,14 +100,12 @@ def check_ollama():
 def check_llm_provider():
     """Check LLM provider connectivity based on configuration"""
     try:
-        import sqlite3
         db_path = Path("data/inboxzen.db")
         if db_path.exists():
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.execute("SELECT value FROM settings WHERE key='llm_provider'")
-            row = cursor.fetchone()
-            provider = row[0] if row else "ollama"
-            conn.close()
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.execute("SELECT value FROM settings WHERE key='llm_provider'")
+                row = cursor.fetchone()
+                provider = row[0] if row else "ollama"
 
             if provider == "ollama":
                 return check_ollama()

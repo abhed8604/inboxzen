@@ -47,8 +47,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ----------------------------------------
-    // Search — navigate on enter or debounce
+    // Search — Ctrl+K / Cmd+K shortcut & input handler
     // ----------------------------------------
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            if (searchInput) {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+    });
+
     if (searchInput) {
         var searchTimeout;
         searchInput.addEventListener('input', function() {
@@ -63,7 +73,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     url += '&q=' + encodeURIComponent(query);
                 }
                 window.location.href = url;
-            }, 400);
+            }, 450);
         });
     }
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InboxZen</title>
+    <title>{% block title %}InboxZen{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -234,11 +234,27 @@
                     if (modal && !modal.classList.contains('hidden')) {
                         modal.classList.add('hidden');
                     }
-                } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
-                    ev.preventDefault();
-                    document.getElementById('search-input').focus();
                 }
             });
+
+            var searchInput = document.getElementById('search-input');
+            var searchQuery = '{{ search_query if search_query is defined else "" }}';
+            if (searchInput && searchQuery) {
+                searchInput.value = searchQuery;
+            }
+
+            var emailList = document.getElementById('email-list');
+            if (emailList) {
+                emailList.addEventListener('click', function(e) {
+                    var card = e.target.closest('.email-card');
+                    if (card) {
+                        var emailId = card.getAttribute('data-email-id');
+                        if (emailId && window.selectEmail) {
+                            window.selectEmail(emailId);
+                        }
+                    }
+                });
+            }
 
             var scanProgress = document.getElementById('scan-progress');
             var scanFill = document.getElementById('scan-progress-fill');
@@ -248,23 +264,23 @@
             var llmUnloadBtn = document.getElementById('llm-unload-btn');
             var currentProvider = '{{ llm_provider if llm_provider is defined else "ollama" }}';
             var scanMode = 'scan';
+            var isScanning = false;
+
+            function getProviderName(provider) {
+                if (provider === 'openai') return 'OpenAI';
+                if (provider === 'openrouter') return 'OpenRouter';
+                return 'Ollama';
+            }
 
             function applyLLMColor(state) {
-                llmDot.classList.remove('loaded', 'scanning');
-                llmDot.style.background = '';
-                llmDot.style.animation = '';
-                if (state === 'loaded') {
-                    llmDot.style.background = 'var(--amber)';
-                    llmDot.style.animation = 'none';
-                } else if (state === 'scanning') {
-                    llmDot.classList.add('scanning');
-                } else if (state === 'online') {
-                    llmDot.style.background = 'var(--ash)';
-                    llmDot.style.animation = 'none';
-                } else {
-                    llmDot.style.background = 'var(--ash)';
-                    llmDot.style.animation = 'none';
-                }
+                llmDot.className = 'status-dot ' + state;
+            }
+
+            function fetchStatus() {
+                fetch('/api/llm/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(status) { updateLLMStatusUI(status); })
+                    .catch(function() {});
             }
 
             var wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -274,13 +290,14 @@
                 var data = JSON.parse(event.data);
 
                 if (data.type === 'scan_start') {
+                    isScanning = true;
                     scanProgress.classList.remove('hidden');
                     scanFill.style.width = '0%';
                     scanMode = data.mode || 'scan';
                     var label = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
                     scanText.textContent = label + '... 0 / ' + data.total;
                     applyLLMColor('scanning');
-                    llmLabel.textContent = 'Scanning';
+                    llmLabel.textContent = label;
                 }
 
                 if (data.type === 'scan_progress') {
@@ -291,53 +308,47 @@
                 }
 
                 if (data.type === 'scan_end') {
+                    isScanning = false;
                     scanProgress.classList.add('hidden');
                     scanFill.style.width = '0%';
-                    applyLLMColor('loaded');
-                    var label = currentProvider === 'ollama' ? 'Ollama' : 'API';
-                    llmLabel.textContent = label + ' Loaded';
+                    fetchStatus();
                     setTimeout(function() { location.reload(); }, 2000);
                 }
 
                 if (data.type === 'ollama_status') {
                     if (data.status === 'unloaded') {
-                        applyLLMColor('online');
-                        llmLabel.textContent = currentProvider === 'ollama' ? 'Ollama Online' : 'API Online';
-                    }
-                    if (data.status === 'loaded') {
-                        applyLLMColor('loaded');
-                        llmLabel.textContent = currentProvider === 'ollama' ? 'Ollama Loaded' : 'API Loaded';
+                        if (!isScanning) {
+                            applyLLMColor('idle');
+                            llmLabel.textContent = getProviderName(currentProvider);
+                        }
                     }
                 }
             };
 
             ws.onclose = function() {
                 scanProgress.classList.add('hidden');
-                applyLLMColor('online');
+                if (!isScanning) fetchStatus();
                 setTimeout(function() { location.reload(); }, 5000);
             };
 
             function updateLLMStatusUI(status) {
                 var provider = status.provider || currentProvider;
-                var label = provider === 'ollama' ? 'Ollama' : 'API';
-                if (status.online && status.loaded) {
-                    applyLLMColor('loaded');
-                    llmLabel.textContent = label + ' Loaded';
-                } else if (status.online) {
-                    applyLLMColor('online');
-                    llmLabel.textContent = label + ' Online';
-                } else {
-                    applyLLMColor('offline');
-                    llmLabel.textContent = label + ' Offline';
+                currentProvider = provider;
+                var label = getProviderName(provider);
+
+                if (isScanning) {
+                    applyLLMColor('scanning');
+                    llmLabel.textContent = (scanMode === 'rescan' ? 'Rescanning' : 'Scanning');
+                    if (llmUnloadBtn) llmUnloadBtn.style.display = 'none';
+                    return;
                 }
+
+                applyLLMColor('idle');
+                llmLabel.textContent = label;
+                if (llmUnloadBtn) llmUnloadBtn.style.display = 'none';
             }
 
-            setInterval(function() {
-                fetch('/api/llm/status')
-                    .then(function(r) { return r.json(); })
-                    .then(function(status) { updateLLMStatusUI(status); })
-                    .catch(function() {});
-            }, 5000);
+            setInterval(fetchStatus, 5000);
 
             fetch('/api/scan-status')
                 .then(function(r) { return r.json(); })

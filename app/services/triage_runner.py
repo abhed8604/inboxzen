@@ -1,13 +1,8 @@
-"""
-Triage orchestration layer.
-Bridge between DB and LLM: picks emails, calls llm_triage, persists results.
-Handles batching, progress callbacks, cancel checks.
-"""
-
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -59,12 +54,12 @@ async def pick_emails(db: AsyncSession, *, rescan: bool, limit: int | None) -> l
     """
     cap = min(limit or MAX_SCAN_LIMIT, MAX_SCAN_LIMIT)
 
-    never_scanned = (await db.execute(
+    never_scanned = list((await db.execute(
         select(Email)
         .where(Email.triaged_at.is_(None))
         .order_by(Email.received_at.desc().nullslast())
         .limit(cap)
-    )).scalars().all()
+    )).scalars().all())
 
     if not rescan:
         return never_scanned
@@ -77,9 +72,9 @@ async def pick_emails(db: AsyncSession, *, rescan: bool, limit: int | None) -> l
             .order_by(Email.received_at.desc())
             .limit(remaining)
         )).scalars().all()
-        return list(never_scanned) + list(already_scanned)
+        return never_scanned + list(already_scanned)
 
-    return list(never_scanned)
+    return never_scanned
 
 
 def mark_email(email: Email, result: TriageResult | None, model: str, error: str | None = None) -> None:
@@ -101,16 +96,29 @@ def mark_email(email: Email, result: TriageResult | None, model: str, error: str
     email.triaged_at = now
 
 
-async def _email_to_dict(email: Email) -> dict:
-    """Convert Email ORM object to dict for llm_triage."""
-    import re
-    body = re.sub(r'<[^>]+>', '', (email.body or ""))[:1500]
+def _email_to_dict(email: Email) -> dict:
+    """Convert Email ORM object to dict with clean plain text body for llm_triage."""
+    raw_body = email.body or ""
+    clean_text = re.sub(r'<(style|script|head|svg)[^>]*>.*?</\1>', '', raw_body, flags=re.DOTALL | re.IGNORECASE)
+    clean_text = re.sub(r'<[^>]+>', ' ', clean_text)
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()[:1500]
+
     return {
         "id": email.id,
         "subject": email.subject or "",
         "sender": email.sender or "",
-        "body": body,
+        "body": clean_text,
     }
+
+
+async def _notify_progress(done: int, total: int, email_id: int, on_progress: Callable | None = None) -> None:
+    _scan_state["done"] = done
+    if done == 1:
+        await broadcast({"type": "ollama_status", "status": "loaded"})
+    await broadcast({"type": "scan_progress", "done": done, "total": total})
+    await broadcast({"type": "email_triaged", "email_id": email_id})
+    if on_progress:
+        on_progress(done, total)
 
 
 async def _triage_sequential(
@@ -124,7 +132,6 @@ async def _triage_sequential(
     cancel_check: Callable | None,
 ) -> int:
     """Sequential triage: one email at a time, with retry and rate-limit backoff."""
-    import asyncio
     global _CANCEL
     done = 0
     is_free = ":free" in model
@@ -140,18 +147,12 @@ async def _triage_sequential(
             if _CANCEL or (cancel_check and cancel_check()):
                 break
 
-            email_dict = await _email_to_dict(email)
+            email_dict = _email_to_dict(email)
             try:
                 result = await scan_email_with_retry(email_dict, provider, model, rules)
                 mark_email(email, result, model)
                 done += 1
-                _scan_state["done"] = done
-                if done == 1:
-                    await broadcast({"type": "ollama_status", "status": "loaded"})
-                await broadcast({"type": "scan_progress", "done": done, "total": total})
-                await broadcast({"type": "email_triaged", "email_id": email.id})
-                if on_progress:
-                    on_progress(done, total)
+                await _notify_progress(done, total, email.id, on_progress)
             except TriageRateLimit:
                 mark_email(email, None, model, error="Rate limited — try again later")
                 await db.commit()
@@ -195,20 +196,14 @@ async def _triage_parallel(
             return
 
         async with semaphore:
-            email_dict = await _email_to_dict(email)
+            email_dict = _email_to_dict(email)
             try:
                 result = await scan_email(email_dict, provider, model, rules)
                 async with lock:
                     mark_email(email, result, model)
                     await db.commit()
                     done += 1
-                    _scan_state["done"] = done
-                    if done == 1:
-                        await broadcast({"type": "ollama_status", "status": "loaded"})
-                    await broadcast({"type": "scan_progress", "done": done, "total": total})
-                    await broadcast({"type": "email_triaged", "email_id": email.id})
-                    if on_progress:
-                        on_progress(done, total)
+                    await _notify_progress(done, total, email.id, on_progress)
             except Exception as e:
                 logger.error("Failed to triage email %d: %s", email.id, e)
                 async with lock:
@@ -272,6 +267,11 @@ async def run_triage_scan(
         _scan_state["running"] = False
         _scan_state["done"] = 0
         _scan_state["total"] = 0
+        if provider and provider.supports_unload():
+            try:
+                await provider.unload(model)
+            except Exception as exc:
+                logger.warning("Failed auto-unload after scan: %s", exc)
         await broadcast({"type": "scan_end"})
 
     if done == 0 and total > 0:

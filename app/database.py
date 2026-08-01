@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from pathlib import Path
@@ -38,8 +39,6 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
         # Migration: add new columns if missing
-        from sqlalchemy import text
-
         result = await conn.execute(text("PRAGMA table_info(emails)"))
         existing_cols = {row[1] for row in result.fetchall()}
 

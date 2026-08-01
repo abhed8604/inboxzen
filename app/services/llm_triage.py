@@ -6,13 +6,14 @@ Handles: prompt construction, provider HTTP calls, JSON extraction, result coerc
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.services.llm_providers import LLMProvider, OllamaProvider
+from app.services.llm_providers import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ def build_prompt(email: dict, rules: str) -> str:
 
 def extract_json(raw: str) -> dict:
     """Extract JSON from LLM output, tolerating markdown fences and prose."""
-    if raw is None:
+    if not raw:
         raise TriageParseError("empty response")
 
     text = raw.strip()
@@ -157,15 +158,22 @@ def extract_json(raw: str) -> dict:
 
 def coerce_result(parsed: dict) -> TriageResult:
     """Validate and normalize parsed dict to TriageResult."""
+    raw_score = parsed.get("score") if "score" in parsed else parsed.get("importance_score")
     try:
-        score = int(round(float(parsed.get("score") or parsed.get("importance_score", 0))))
+        score = int(round(float(raw_score))) if raw_score is not None else None
     except (TypeError, ValueError):
-        score = 0
-    score = max(0, min(100, score))
-
-    category = str(parsed.get("category") or "Other").strip().title() or "Other"
+        score = None
 
     importance = str(parsed.get("importance", "")).strip().lower()
+
+    if score is None or (score == 0 and importance):
+        importance_map = {"critical": 95, "high": 85, "medium": 50, "low": 20}
+        score = importance_map.get(importance, score or 0)
+    elif score is None:
+        score = 0
+
+    score = max(0, min(100, score))
+    category = str(parsed.get("category") or "Other").strip().title() or "Other"
     important = importance in {"critical", "high"} or score >= 70
 
     action_raw = parsed.get("action_required", False)
@@ -202,7 +210,6 @@ async def scan_email(email: dict, provider: LLMProvider, model: str, rules: str)
 
 async def scan_email_with_retry(email: dict, provider: LLMProvider, model: str, rules: str) -> TriageResult:
     """Scan with retry: Ollama waits 30s on unavailable, rate-limited providers retry once."""
-    import asyncio
     try:
         return await scan_email(email, provider, model, rules)
     except TriageRateLimit:

@@ -1,10 +1,14 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+import asyncio
+import base64
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import html as html_lib
 import logging
 import re
-import base64
-import html as html_lib
+from urllib.parse import quote
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.models import Account, Email
 from app.auth.google_oauth import get_gmail_service, refresh_access_token
@@ -34,38 +38,30 @@ def _sanitize_html(raw: str) -> str:
         return ""
 
     # Remove <script>, <iframe>, <object>, <embed>, <form>, <input>, <textarea>, <button>, <svg>
-    # NOTE: <head> is NOT stripped — it contains <style> blocks emails need for layout
     text = re.sub(
         r'<(script|iframe|object|embed|form|input|textarea|button|svg)[^>]*>.*?</\1>',
         '', raw, flags=re.IGNORECASE | re.DOTALL,
     )
-    # Remove self-closing dangerous tags
     text = re.sub(r'<(script|iframe|object|embed|form|input|textarea|button|svg|meta|link)[^>]*/?\s*>', '', text, flags=re.IGNORECASE)
-    # Remove <head> wrapper but KEEP its content (style blocks, title, etc.)
-    text = re.sub(r'<head[^>]*>', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'</head>', '', text, flags=re.IGNORECASE)
-    # Remove event handlers (onclick, onerror, onload, etc.)
+    text = re.sub(r'</?head[^>]*>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s*on\w+\s*=\s*(?:"[^"]*"|\'[^\']*\'|\S+)', '', text, flags=re.IGNORECASE)
-    # Remove javascript: URLs
     text = re.sub(r'href\s*=\s*(?:"javascript:[^"]*"|\'javascript:[^\']*\')', '', text, flags=re.IGNORECASE)
-    # Strip tags not in whitelist (keep their content)
+
     def _tag_strip(m):
         tag = m.group(0)
         name = re.match(r'</?([a-zA-Z]+)', tag)
         if name and name.group(1).lower() in _SAFE_TAGS:
             return tag
         return ''
+
     text = re.sub(r'<[^>]+>', _tag_strip, text)
-    # Clean tracking domains from href attributes
     for domain in _TRACKING_DOMAINS:
         text = re.sub(
             r'href\s*=\s*("https?://[^"]*' + domain + r'[^"]*"|\'https?://[^\']*' + domain + r'[^\']*\')',
             '', text, flags=re.IGNORECASE,
         )
-    # Remove utm_* query params from remaining URLs
     text = re.sub(r'(\?|&)(utm_\w+=[^&"\']*)&?', lambda m: '?' if m.group(0).startswith('?') else '', text)
     text = re.sub(r'\?$', '', text)
-    # Collapse excessive whitespace but preserve intentional breaks
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
@@ -76,8 +72,7 @@ def _plain_to_html(text: str) -> str:
         return ""
     text = html_lib.escape(text)
     text = re.sub(r'(https?://[^\s<>"]+)', r'<a href="\1" target="_blank" rel="noopener">\1</a>', text)
-    text = text.replace('\n', '<br>')
-    return text
+    return text.replace('\n', '<br>')
 
 
 def _resolve_cid_refs(html: str, images: dict) -> str:
@@ -95,7 +90,7 @@ def _resolve_cid_refs(html: str, images: dict) -> str:
     return re.sub(r'src\s*=\s*["\']cid:([^"\']+)["\']', replace_cid, html, flags=re.IGNORECASE)
 
 
-_PROXY_img_PATTERN = re.compile(
+_PROXY_IMG_PATTERN = re.compile(
     r'(<img\s[^>]*?)src\s*=\s*["\']?(https?://[^"\'>\s]+)["\']?',
     re.IGNORECASE,
 )
@@ -103,27 +98,22 @@ _PROXY_img_PATTERN = re.compile(
 
 def _rewrite_image_urls(html: str) -> str:
     """Rewrite external <img src="https://..."> to /proxy/image?url=... so browser can load them."""
-    from urllib.parse import quote
-
     def _replace(m):
         prefix = m.group(1)
         url = m.group(2)
         return f'{prefix}src="/proxy/image?url={quote(url, safe="")}"'
 
-    return _PROXY_img_PATTERN.sub(_replace, html)
+    return _PROXY_IMG_PATTERN.sub(_replace, html)
 
 
 def _extract_body(payload: dict) -> tuple[str, str, dict]:
-    """Extract HTML, plain text bodies, and inline images from Gmail payload.
-    Returns (html, plain, images_dict) where images_dict maps content_id -> (mime, base64_data).
-    """
+    """Extract HTML, plain text bodies, and inline images from Gmail payload."""
     html_body = ""
     plain_body = ""
     images = {}
 
     parts = payload.get("parts", [])
     if not parts:
-        # Single-part message
         mime = payload.get("mimeType", "")
         data = payload.get("body", {}).get("data", "")
         if data:
@@ -134,7 +124,6 @@ def _extract_body(payload: dict) -> tuple[str, str, dict]:
                 plain_body = decoded
         return html_body, plain_body, images
 
-    # Multipart — recurse into parts
     for part in parts:
         mime = part.get("mimeType", "")
         data = part.get("body", {}).get("data", "")
@@ -144,7 +133,6 @@ def _extract_body(payload: dict) -> tuple[str, str, dict]:
         elif mime == "text/plain" and data and not plain_body:
             plain_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
         elif mime.startswith("image/") and data:
-            # Collect inline image — find its Content-Id header
             cid = ""
             for h in part.get("headers", []):
                 if h["name"].lower() == "content-id":
@@ -153,7 +141,6 @@ def _extract_body(payload: dict) -> tuple[str, str, dict]:
             if cid:
                 images[cid] = (mime, data)
 
-        # Recurse into nested parts (e.g. multipart/alternative inside multipart/mixed)
         if "parts" in part:
             sub_html, sub_plain, sub_images = _extract_body(part)
             if sub_html and not html_body:
@@ -166,14 +153,12 @@ def _extract_body(payload: dict) -> tuple[str, str, dict]:
 
 async def sync_account(account_id: int, db: AsyncSession):
     """Sync emails for a specific Gmail account"""
-    # Get the account
     result = await db.execute(select(Account).where(Account.id == account_id))
     account = result.scalar_one_or_none()
     
     if not account:
         return []
     
-    # Check if token is expired and refresh if needed
     if account.token_expiry:
         expiry = account.token_expiry
         if expiry.tzinfo is None:
@@ -188,16 +173,16 @@ async def sync_account(account_id: int, db: AsyncSession):
                 logger.error("Failed to refresh token for account %s: %s", account.email, e)
                 return []
     
-    # Get Gmail service
     service = get_gmail_service(account.access_token, account.refresh_token)
     
-    # Fetch recent emails (last 50 for MVP)
     try:
-        results = service.users().messages().list(
-            userId="me",
-            maxResults=50,
-            labelIds=["INBOX"]
-        ).execute()
+        results = await asyncio.to_thread(
+            service.users().messages().list(
+                userId="me",
+                maxResults=50,
+                labelIds=["INBOX"]
+            ).execute
+        )
         
         messages = results.get("messages", [])
         new_emails = []
@@ -205,37 +190,31 @@ async def sync_account(account_id: int, db: AsyncSession):
         for message in messages:
             gmail_id = message["id"]
             
-            # Check if email already exists
             result = await db.execute(
                 select(Email).where(
                     Email.gmail_id == gmail_id,
                     Email.account_id == account_id
                 )
             )
-            existing_email = result.scalar_one_or_none()
-            
-            if existing_email:
+            if result.scalar_one_or_none():
                 continue
             
-            # Get full email details
-            msg = service.users().messages().get(
-                userId="me",
-                id=gmail_id,
-                format="full"
-            ).execute()
+            msg = await asyncio.to_thread(
+                service.users().messages().get(
+                    userId="me",
+                    id=gmail_id,
+                    format="full"
+                ).execute
+            )
             
-            # Extract email data
             headers = msg["payload"]["headers"]
             subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
             sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
             date_str = next((h["value"] for h in headers if h["name"] == "Date"), None)
             
-            # Parse date
             received_at = datetime.now(timezone.utc)
             if date_str:
                 try:
-                    # Simple date parsing for MVP
-                    from email.utils import parsedate_to_datetime
                     received_at = parsedate_to_datetime(date_str)
                 except Exception:
                     pass
@@ -308,11 +287,13 @@ async def mark_email_read(email_id: int, db: AsyncSession):
     # Update Gmail
     try:
         service = get_gmail_service(account.access_token, account.refresh_token)
-        service.users().messages().modify(
-            userId="me",
-            id=email.gmail_id,
-            body={"removeLabelIds": ["UNREAD"]}
-        ).execute()
+        await asyncio.to_thread(
+            service.users().messages().modify(
+                userId="me",
+                id=email.gmail_id,
+                body={"removeLabelIds": ["UNREAD"]}
+            ).execute
+        )
         
         # Update local database
         email.is_read = True
@@ -339,11 +320,13 @@ async def trash_email(email_id: int, db: AsyncSession):
 
     try:
         service = get_gmail_service(account.access_token, account.refresh_token)
-        service.users().messages().modify(
-            userId="me",
-            id=email.gmail_id,
-            body={"removeLabelIds": ["INBOX"], "addLabelIds": ["TRASH"]}
-        ).execute()
+        await asyncio.to_thread(
+            service.users().messages().modify(
+                userId="me",
+                id=email.gmail_id,
+                body={"removeLabelIds": ["INBOX"], "addLabelIds": ["TRASH"]}
+            ).execute
+        )
 
         email.is_archived = True
         await db.commit()

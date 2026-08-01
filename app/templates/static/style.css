@@ -1145,11 +1145,14 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   font-family: var(--font-body);
   font-size: 12.5px;
   font-weight: 500;
-  border: 1px solid;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   animation: toastIn .3s var(--ease) both;
   white-space: nowrap;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .toast svg {
@@ -1159,17 +1162,38 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
 }
 
 .toast.success {
-  background: rgba(18,22,32,0.88);
+  background: rgba(18,22,32,0.92);
   color: var(--signal);
-  border-color: rgba(127,232,192,0.2);
-  box-shadow: 0 4px 20px rgba(127,232,192,0.1);
+  border-color: rgba(127,232,192,0.25);
+  box-shadow: 0 4px 20px rgba(127,232,192,0.12);
 }
 
 .toast.error {
-  background: rgba(18,22,32,0.88);
+  background: rgba(18,22,32,0.92);
   color: var(--ember);
-  border-color: rgba(226,87,76,0.2);
-  box-shadow: 0 4px 20px rgba(226,87,76,0.1);
+  border-color: rgba(226,87,76,0.25);
+  box-shadow: 0 4px 20px rgba(226,87,76,0.12);
+}
+
+[data-theme="light"] .toast {
+  background: #F3ECDA;
+  color: var(--text-primary);
+  border-color: var(--border);
+  box-shadow: 0 4px 16px rgba(43, 38, 32, 0.12);
+}
+
+[data-theme="light"] .toast.success {
+  background: #F3ECDA;
+  color: #1F7A5C;
+  border-color: rgba(31, 122, 92, 0.35);
+  box-shadow: 0 4px 16px rgba(31, 122, 92, 0.15), 0 2px 6px rgba(43, 38, 32, 0.08);
+}
+
+[data-theme="light"] .toast.error {
+  background: #F3ECDA;
+  color: #B5432E;
+  border-color: rgba(181, 67, 46, 0.35);
+  box-shadow: 0 4px 16px rgba(181, 67, 46, 0.15), 0 2px 6px rgba(43, 38, 32, 0.08);
 }
 
 .toast.removing {
@@ -1206,6 +1230,13 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   align-items: center;
   gap: 12px;
   animation: scanSlideIn .25s var(--ease);
+}
+
+[data-theme="light"] .scan-progress {
+  background: #F3ECDA;
+  color: var(--text-primary);
+  border-color: var(--border);
+  box-shadow: 0 -4px 20px rgba(43, 38, 32, 0.12);
 }
 
 @keyframes scanSlideIn {
@@ -1278,11 +1309,6 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   flex-shrink: 0;
   box-shadow: 0 0 0 3px rgba(130,136,154,0.2);
   transition: background .3s, box-shadow .3s;
-}
-
-.status-dot.loaded {
-  background: var(--amber);
-  box-shadow: 0 0 0 3px rgba(227,168,87,0.2);
 }
 
 .status-dot.scanning {

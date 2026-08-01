@@ -6,7 +6,9 @@ import httpx
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from app.config import OLLAMA_HOST, OPENAI_API_KEY, OPENROUTER_API_KEY
+from app.models import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -91,21 +93,16 @@ class OllamaProvider(LLMProvider):
     async def check_status(self, model: str) -> LLMStatus:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
-                # Check /api/ps for currently loaded models
                 try:
                     r = await client.get(f"{self.host}/api/ps")
                     if r.status_code == 200:
                         running = r.json().get("models", [])
-                        loaded = any(
-                            m.get("name", "").startswith(model)
-                            for m in running
-                        )
+                        loaded = any(m.get("name", "").startswith(model) for m in running)
                         if loaded:
                             return LLMStatus(online=True, loaded=True)
                 except Exception:
                     pass
 
-                # Fallback: check /api/tags for online status
                 r = await client.get(f"{self.host}/api/tags")
                 if r.status_code == 200:
                     return LLMStatus(online=True, loaded=False)
@@ -122,8 +119,9 @@ class OllamaProvider(LLMProvider):
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
+                    "keep_alive": "5m",
                     "options": {
-                        "temperature": 0.3,
+                        "temperature": 0.1,
                         "num_ctx": 4096,
                         "num_predict": 512,
                         "num_gpu": 999,
@@ -301,24 +299,17 @@ async def get_provider(db=None) -> LLMProvider:
     api_key = ""
 
     if db is not None:
-        from sqlalchemy import select
-        from app.models import Settings
-
         result = await db.execute(select(Settings).where(Settings.key == "llm_provider"))
         setting = result.scalar_one_or_none()
         if setting and setting.value:
             provider_name = setting.value
 
-        if provider_name == "openai":
-            result = await db.execute(select(Settings).where(Settings.key == "openai_api_key"))
+        key_name = f"{provider_name}_api_key"
+        if provider_name in ("openai", "openrouter"):
+            result = await db.execute(select(Settings).where(Settings.key == key_name))
             setting = result.scalar_one_or_none()
-            api_key = (setting.value if setting else "") or OPENAI_API_KEY
-        elif provider_name == "openrouter":
-            result = await db.execute(select(Settings).where(Settings.key == "openrouter_api_key"))
-            setting = result.scalar_one_or_none()
-            api_key = (setting.value if setting else "") or OPENROUTER_API_KEY
-    else:
-        provider_name = "ollama"
+            fallback_key = OPENAI_API_KEY if provider_name == "openai" else OPENROUTER_API_KEY
+            api_key = (setting.value if setting else "") or fallback_key
 
     if provider_name == "openai":
         return OpenAIProvider(api_key=api_key)
