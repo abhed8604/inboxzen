@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Settings
-from app.services.llm_providers import get_provider
+from app.services.llm_providers import is_laya_loaded
 
 
 def _toast(message: str, kind: str = "success") -> HTMLResponse:
@@ -21,38 +21,21 @@ def _toast(message: str, kind: str = "success") -> HTMLResponse:
     return HTMLResponse(f'<div class="toast {kind}">{icon}{message}</div>')
 
 
-_MODEL_DEFAULTS = {
-    "ollama": "unsloth/gemma-4-E2B-it-GGUF:IQ4_XS",
-    "openai": "gpt-4o",
-    "openrouter": "",
-}
-_MODEL_KEYS = {
-    "ollama": "ollama_model",
-    "openai": "openai_model",
-    "openrouter": "openrouter_model",
-}
-
-
 async def get_selected_model(db: AsyncSession) -> str:
-    """Read the active model name from settings based on provider."""
-    provider = await get_provider(db)
-    key = _MODEL_KEYS.get(provider.name, "")
-    if key:
-        result = await db.execute(select(Settings).where(Settings.key == key))
-        setting = result.scalar_one_or_none()
-        if setting and setting.value and setting.value.strip():
-            return setting.value
-    return _MODEL_DEFAULTS.get(provider.name, "")
+    """Read the active Laya model name from settings."""
+    result = await db.execute(select(Settings).where(Settings.key == "laya_model"))
+    setting = result.scalar_one_or_none()
+    val = setting.value.strip() if setting and setting.value else "english"
+    from app.services.llm_triage import normalize_laya_model
+    return normalize_laya_model(val)
 
 
 async def _get_llm_ctx(db: AsyncSession) -> dict:
     """Return LLM status context for templates."""
-    provider = await get_provider(db)
     model = await get_selected_model(db)
-    status = await provider.check_status(model)
     return {
-        "llm_provider": provider.name,
+        "llm_provider": "laya",
         "llm_model_name": model,
-        "llm_online": status.online,
-        "llm_loaded": status.loaded,
+        "llm_online": True,
+        "llm_loaded": is_laya_loaded(),
     }

@@ -55,15 +55,16 @@
     <div id="zen-card" class="zen-card">
         <div class="zen-left">
             <div class="zen-heading">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.132 3.518 2.482 5.868 6 6-3.518.132-5.868 2.482-6 6-.132-3.518-2.482-5.868-6-6 3.518-.132 5.868-2.482 6-6z"/><path d="M5 3c.07.9.6 1.43 1.5 1.5-.9.07-1.43.6-1.5 1.5-.07-.9-.6-1.43-1.5-1.5.9-.07 1.43-.6 1.5-1.5z"/><path d="M19 16c.07.9.6 1.43 1.5 1.5-.9.07-1.43.6-1.5 1.5-.07-.9-.6-1.43-1.5-1.5.9-.07 1.43-.6 1.5-1.5z"/></svg>
-                <span>Zen Summary</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.132 3.518 2.482 5.868 6 6-3.518.132-5.868 2.482-6 6-.132-3.518-2.482-5.868-6-6 3.518-.132 5.868-2.482 6-6z"/></svg>
+                <span>Triage Decision</span>
             </div>
-            {% if email.summary %}
-            <p class="zen-summary">{{ email.summary }}</p>
-            <div class="zen-footer">rated by AI</div>
+            {% if email.category %}
+            <div class="zen-badges" style="display:flex;align-items:center;gap:8px;margin:4px 0 6px 0;">
+                <span class="badge" style="display:inline-block;padding:3px 10px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--bone);font-size:12px;font-weight:500;">{{ email.category }}</span>
+            </div>
+            <div class="zen-footer">Decision by Laya · {{ email.scan_model or 'ModernBERT' }}</div>
             {% else %}
-            <p class="zen-summary" style="opacity:0.4;font-style:italic;">No summary yet</p>
-            <div class="zen-footer">click refresh to analyze</div>
+            <div class="zen-footer" style="margin-top:6px;">Not triaged yet · Click rescan to analyze</div>
             {% endif %}
         </div>
         <div class="gauge-wrap">

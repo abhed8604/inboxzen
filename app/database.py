@@ -49,3 +49,7 @@ async def init_db():
             if col_name not in existing_cols:
                 await conn.execute(text(f"ALTER TABLE emails ADD COLUMN {col_name} {col_type}"))
                 logger.info("Added column: %s", col_name)
+
+        # Migrate legacy ollama settings to laya
+        await conn.execute(text("UPDATE settings SET value = 'laya' WHERE key = 'llm_provider' AND value = 'ollama'"))
+        await conn.execute(text("UPDATE settings SET value = 'english' WHERE key = 'laya_model' AND (value LIKE '%convaiinnovations%' OR value = 'default' OR value = '')"))

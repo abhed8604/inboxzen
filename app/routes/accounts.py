@@ -9,8 +9,7 @@ from app.database import get_db, async_session
 from app.models import Account
 from app.auth.google_oauth import get_google_auth_url, exchange_code_for_tokens, get_user_email
 from app.config import ACCOUNT_COLORS
-from app.services.gmail_sync import sync_all_accounts
-from app.services.triage_runner import run_triage_scan
+from app.services.gmail_sync import sync_and_triage
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 logger = logging.getLogger(__name__)
@@ -19,9 +18,7 @@ logger = logging.getLogger(__name__)
 async def _bg_initial_sync():
     try:
         async with async_session() as bg_db:
-            new_emails = await sync_all_accounts(bg_db)
-            if new_emails:
-                await run_triage_scan(bg_db)
+            await sync_and_triage(bg_db)
     except Exception as exc:
         logger.error("Background sync after OAuth failed: %s", exc)
 

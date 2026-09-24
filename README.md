@@ -1,11 +1,11 @@
 # InboxZen
 
-Local-first, browser-based AI email triage for Gmail. Runs entirely on your machine with Python backend, HTML/CSS/HTMX frontend, and local LLM via Ollama for triage.
+Local-first, browser-based AI email triage for Gmail. Runs entirely on your machine with Python backend, HTML/CSS/HTMX frontend, and local decision model via Laya for triage.
 
 ## Features
 
 - **Multi-account Gmail support** - Connect multiple Gmail accounts with distinct color coding
-- **AI Triage** - Automatic email categorization using local Ollama models
+- **AI Triage** - Automatic email categorization, urgency scoring, and action detection using local Laya decision models
 - **Real-time updates** - Live email updates via WebSocket
 - **Dark/Light mode** - Theme toggle with persistence
 - **Single-command startup** - `python start.py` handles everything
@@ -21,7 +21,6 @@ Local-first, browser-based AI email triage for Gmail. Runs entirely on your mach
 ## Prerequisites
 
 - Python 3.11+
-- Ollama running locally (for AI triage)
 - Google Cloud project with Gmail API enabled
 
 ## Configuration
@@ -43,7 +42,6 @@ Create `.env` file from `.env.example`:
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:8000/accounts/oauth2callback
-OLLAMA_HOST=http://localhost:11434
 SECRET_KEY=your_secret_key
 ```
 
@@ -53,7 +51,7 @@ SECRET_KEY=your_secret_key
 
 - **Backend**: FastAPI + SQLAlchemy + SQLite
 - **Frontend**: Jinja2 templates + HTMX + Vanilla CSS
-- **AI**: Ollama (local LLM inference)
+- **AI**: Laya (local non-autoregressive decision model)
 - **Real-time**: WebSocket via htmx-ext-ws
 
 ### Key Design Decisions
@@ -84,9 +82,7 @@ inboxzen/
 │   ├── auth/
 │   │   └── google_oauth.py  # OAuth2 flow
 │   ├── services/
-│   │   ├── gmail_sync.py    # Gmail API sync
-│   │   ├── triage.py        # Ollama triage
-│   │   └── scheduler.py     # Background jobs
+│   │   ├── llm_triage.py    # Laya triage engine
 │   ├── routes/
 │   │   ├── accounts.py      # Account management
 │   │   ├── inbox.py         # Email views
@@ -110,19 +106,18 @@ inboxzen/
 ### Email Triage
 
 - New emails are automatically synced every 5 minutes (configurable)
-- Each email is triaged with local Ollama model
-- Priority levels: CRITICAL, HIGH, MEDIUM, LOW
-- Categories: Job Offer, Bank/Finance, Newsletter, Personal, etc.
+- Each email is triaged locally with Laya's non-autoregressive decision model
+- Predicts category, urgency score (0-100), and action required
 
 ### Manual Sync
 
-Click "Sync Now" button in inbox to manually trigger sync.
+Click "Sync mails" in inbox to manually trigger sync.
 
 ### Filtering
 
-- Filter by account using account chips
-- Filter by priority using priority chips
-- Multiple filters can be combined
+- Filter by account using account sidebar items
+- Filter by Important vs All
+- Unread filter switch
 
 ## Development
 
@@ -133,8 +128,8 @@ python start.py
 ```
 
 This will:
-1. Create virtual environment
-2. Install dependencies
+1. Validate virtual environment (`.venv`)
+2. Verify dependencies and Laya readiness
 3. Start server with auto-reload
 
 ### Database
@@ -143,15 +138,14 @@ Database is automatically created on first run at `data/inboxzen.db`.
 
 ### Logs
 
-Server logs are printed to console. For production, configure logging in `app/main.py`.
+Server logs are printed to console.
 
 ## Troubleshooting
 
-### Ollama Connection Issues
+### Laya Troubleshooting
 
-- Ensure Ollama is running: `ollama serve`
-- Check Ollama host in `.env` file
-- Triage will fail gracefully until Ollama is available
+- Preloaded into RAM automatically on startup.
+- Can be manually loaded/unloaded in the sidebar or Settings modal.
 
 ### Gmail API Errors
 
@@ -163,17 +157,3 @@ Server logs are printed to console. For production, configure logging in `app/ma
 
 - Delete `data/inboxzen.db` to reset
 - Database is recreated on next startup
-
-## Future Enhancements (Out of Scope for MVP)
-
-- [ ] Outlook/IMAP support
-- [ ] Email composing/sending
-- [ ] Threading/conversation view
-- [ ] Attachments handling
-- [ ] Mobile responsiveness
-- [ ] Advanced visual design (glass/blur/AMOLED)
-- [ ] Multi-provider support
-
-## License
-
-MIT License

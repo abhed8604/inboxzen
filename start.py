@@ -8,9 +8,6 @@ import os
 import sys
 import subprocess
 import shutil
-import sqlite3
-import urllib.request
-import urllib.error
 from pathlib import Path
 
 def check_python_version():
@@ -23,8 +20,8 @@ def check_python_version():
 def get_venv_python():
     """Get the path to the virtual environment's Python executable"""
     if sys.platform == "win32":
-        return Path("venv/Scripts/python.exe")
-    return Path("venv/bin/python")
+        return Path(".venv/Scripts/python.exe")
+    return Path(".venv/bin/python")
 
 def is_venv_valid():
     """Check if the virtual environment python is functional"""
@@ -39,19 +36,36 @@ def is_venv_valid():
 
 def create_venv():
     """Create virtual environment if it doesn't exist or is invalid/moved"""
-    venv_path = Path("venv")
+    venv_path = Path(".venv")
     if venv_path.exists() and not is_venv_valid():
         print("Existing virtual environment is invalid or was moved. Recreating...")
         shutil.rmtree(venv_path, ignore_errors=True)
         
     if not venv_path.exists():
         print("Creating virtual environment...")
-        subprocess.run([sys.executable, "-m", "venv", "venv"], check=True)
+        subprocess.run([sys.executable, "-m", "venv", ".venv"], check=True)
         print("Virtual environment created successfully")
     return venv_path
 
+def are_dependencies_installed():
+    """Check if key dependencies are already installed in the venv."""
+    python_path = get_venv_python()
+    try:
+        res = subprocess.run(
+            [str(python_path), "-c", "import fastapi, uvicorn, sqlalchemy, laya"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
 def install_dependencies():
-    """Install dependencies from requirements.txt"""
+    """Install dependencies from requirements.txt if needed."""
+    if are_dependencies_installed():
+        print("✓ Dependencies already installed")
+        return
+
     python_path = get_venv_python()
     if not python_path.exists():
         print("Error: Python not found in virtual environment")
@@ -79,58 +93,46 @@ def check_env_file():
             sys.exit(1)
     return env_path
 
-def check_ollama():
-    """Check if Ollama is running (only relevant if using Ollama provider)"""
-    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    try:
-        req = urllib.request.Request(f"{ollama_host}/api/tags")
-        with urllib.request.urlopen(req, timeout=5.0) as response:
-            if response.status == 200:
-                print("✓ Ollama is running")
-                return True
-            print(f"⚠ Ollama responded with status {response.status}")
-            return False
-    except Exception as e:
-        print(f"⚠ Could not connect to Ollama at {ollama_host}: {e}")
-        print("  If using Ollama, triage will fail until it's running")
-        print("  If using OpenAI/OpenRouter, this warning can be ignored")
-        return False
-
-
-def check_llm_provider():
-    """Check LLM provider connectivity based on configuration"""
-    try:
-        db_path = Path("data/inboxzen.db")
-        if db_path.exists():
-            with sqlite3.connect(str(db_path)) as conn:
-                cursor = conn.execute("SELECT value FROM settings WHERE key='llm_provider'")
-                row = cursor.fetchone()
-                provider = row[0] if row else "ollama"
-
-            if provider == "ollama":
-                return check_ollama()
-            elif provider in ("openai", "openrouter"):
-                print(f"✓ Using {provider} as LLM provider (API key required)")
-                return True
-    except Exception:
-        pass
-    return check_ollama()
 
 def start_server():
-    """Start the FastAPI server"""
+    """Start the FastAPI server with all logging redirected to a timestamped log file."""
     python_path = get_venv_python()
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    from datetime import datetime
+    log_path = logs_dir / f"inboxzen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
     print("Starting InboxZen server...")
     print("Server will be available at http://localhost:8000")
+    print(f"Logging to: {log_path}")
     print("Press Ctrl+C to stop the server")
-    
-    # Run uvicorn with the FastAPI app
-    subprocess.run([
-        str(python_path), "-m", "uvicorn", 
-        "app.main:app", 
+
+    env = os.environ.copy()
+    env["INBOXZEN_LOG_FILE"] = str(log_path.resolve())
+
+    uvicorn_cmd = [
+        str(python_path), "-m", "uvicorn",
+        "app.main:app",
         "--host", "0.0.0.0",
         "--port", "8000",
-        "--reload"
-    ], check=True)
+    ]
+    if "--reload" in sys.argv:
+        uvicorn_cmd.append("--reload")
+
+    with open(log_path, "a", encoding="utf-8", buffering=1) as log_f:
+        try:
+            subprocess.run(
+                uvicorn_cmd,
+                env=env,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
+        except KeyboardInterrupt:
+            print("\nServer stopped.")
+        except subprocess.CalledProcessError as e:
+            if e.returncode not in (0, -2, 130):
+                print(f"\nServer exited with code {e.returncode}. See {log_path} for details.")
 
 def main():
     """Main startup function"""
@@ -148,9 +150,6 @@ def main():
     
     # Check .env file
     check_env_file()
-    
-    # Check LLM provider connectivity
-    check_llm_provider()
     
     # Start server
     start_server()

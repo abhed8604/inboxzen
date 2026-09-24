@@ -302,91 +302,23 @@ async def get_attachment_data(account: Account, gmail_id: str, attachment_id: st
     return b""
 
 
-async def sync_email_attachments(email: Email, db: AsyncSession) -> list:
-    """On-demand backfill: Fetch email payload from Gmail API and save attachments if missing for existing email."""
-    if not email or not email.account or not email.gmail_id:
-        return []
-
-    if email.attachments:
-        return email.attachments
-
-    account = email.account
-    try:
-        service = get_gmail_service(account.access_token, account.refresh_token)
-        msg = await asyncio.to_thread(
-            service.users().messages().get(
-                userId="me",
-                id=email.gmail_id,
-                format="full"
-            ).execute
-        )
-        _, _, _, attachments_data = _extract_body_and_attachments(msg.get("payload", {}))
-        
-        new_atts = []
-        for att in attachments_data:
-            if att.get("attachment_id"):
-                attachment = Attachment(
-                    email_id=email.id,
-                    filename=att["filename"],
-                    mime_type=att["mime_type"],
-                    size=att["size"],
-                    gmail_attachment_id=att["attachment_id"]
-                )
-                db.add(attachment)
-                new_atts.append(attachment)
-
-        if new_atts:
-            await db.commit()
-            await db.refresh(email, attribute_names=["attachments"])
-        return email.attachments
-    except Exception as e:
-        logger.error("Failed to sync attachments for email %s: %s", email.id, e)
-        return []
-
-
-async def sync_all_accounts(db: AsyncSession):
-    """Sync emails for all connected accounts"""
+async def sync_all_accounts(db: AsyncSession) -> list[Email]:
+    """Sync emails for all connected accounts."""
     result = await db.execute(select(Account))
     accounts = result.scalars().all()
-    
+
     all_new_emails = []
     for account in accounts:
         new_emails = await sync_account(account.id, db)
         all_new_emails.extend(new_emails)
-    
+
     return all_new_emails
 
-async def mark_email_read(email_id: int, db: AsyncSession):
-    """Mark an email as read in Gmail and update local database"""
-    result = await db.execute(select(Email).where(Email.id == email_id))
-    email = result.scalar_one_or_none()
-    
-    if not email:
-        return False
-    
-    # Get the account
-    account_result = await db.execute(select(Account).where(Account.id == email.account_id))
-    account = account_result.scalar_one_or_none()
-    
-    if not account:
-        return False
-    
-    # Update Gmail
-    try:
-        service = get_gmail_service(account.access_token, account.refresh_token)
-        await asyncio.to_thread(
-            service.users().messages().modify(
-                userId="me",
-                id=email.gmail_id,
-                body={"removeLabelIds": ["UNREAD"]}
-            ).execute
-        )
-        
-        # Update local database
-        email.is_read = True
-        await db.commit()
-        return True
-        
-    except Exception as e:
-        logger.error("Failed to mark email as read: %s", e)
-        return False
+
+async def sync_and_triage(db: AsyncSession) -> int:
+    """Sync all accounts and triage any new emails."""
+    from app.services.triage_runner import run_triage_scan
+    new_emails = await sync_all_accounts(db)
+    if new_emails:
+        await run_triage_scan(db)
+    return len(new_emails)

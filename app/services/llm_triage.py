@@ -1,62 +1,63 @@
 """
-Pure LLM integration layer.
+Laya decision model triage layer.
 No DB access, no WebSocket broadcasts.
-Handles: prompt construction, provider HTTP calls, JSON extraction, result coercion.
+Handles: running Laya ModernBERT questions and scoring classifications.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 from dataclasses import dataclass
-from pathlib import Path
-
-from app.services.llm_providers import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-UNAVAILABLE_RETRY_SECONDS = 30
+DEFAULT_RULES = """- Job offers, interviews, recruiter messages, test links, and internship results -> critical priority (score 95)
+- Final year project/thesis submissions, exam schedules, professor emails, and graduation deadlines -> critical priority (score 90)
+- University announcements, departmental notices, and placement cell updates -> high priority (score 85)
+- Invoices, tuition fee receipts, scholarships, loan updates, and bank alerts -> high priority (score 80)
+- GitHub, coding platforms (LeetCode, HackerRank), and hackathons -> high priority (score 75)
+- Campus events, student clubs, workshops, and society announcements -> normal priority (score 45)
+- Student discounts, retail newsletters, and promotional sales -> low priority (score 25)
+- Marketing pitches and promotional spam -> low priority (score 15)"""
 
-DEFAULT_RULES = """## Default Scoring Rules
 
-- Emails from **@github.com** (notifications, PRs, issues) → 80
-- Emails with subject containing **invoice** or **payment** → 90
-- Emails with subject containing **job offer** or **interview** → 95
-- Emails from your manager or team lead → 90
-- Bank alerts or security notifications → 95
-- Meeting invitations or calendar events → 80
-- Newsletters from **substack.com**, **medium.com**, or tech blogs → 40
-- Marketing emails or promotions → 20
-- Automated notifications (CI/CD, deploys, monitoring) → 30
-- Social media notifications (LinkedIn, Twitter) → 25
-- Personal messages from known contacts → 75
-- Emails requiring a response within 24 hours → 85
-- Emails that are FYI only with no action needed → 35"""
+def get_laya_questions(instructions: str = "") -> dict:
+    """Build Laya question definitions, incorporating user custom priority rules."""
+    urgency_instr = "How urgent or important is this email?"
+    if instructions and instructions.strip():
+        urgency_instr += f"\nFollow these priority rules:\n{instructions.strip()}"
 
-RULES_PATH = Path.home() / ".inboxzen" / "triage_rules.md"
+    cat_instr = "Which category best describes this email in `body`?"
+    if instructions and instructions.strip():
+        cat_instr += f"\nContext rules:\n{instructions.strip()}"
 
-PROMPT_TEMPLATE = """{rules}
-
-------------------------
-EMAIL TO ANALYZE
-------------------------
-
-Subject:
-{subject}
-
-From:
-{sender}
-
-To:
-{to}
-
-Body:
-{body}
-
-Return ONLY a JSON object with exactly these fields, no additional text:
-{{"importance":"CRITICAL|HIGH|MEDIUM|LOW","score":<0-100>,"category":"<category>","action_required":<true|false>,"reason":"<one sentence>","summary":"<1-2 sentences>"}}"""
+    return {
+        "category": {
+            "type": "choice",
+            "instructions": cat_instr,
+            "criteria": {
+                "Careers": "job applications, recruiter messages, interview invitations, hiring offers, internships, coding assessments, placement cell notices",
+                "Academics": "professors, course materials, exam schedules, assignment deadlines, final year capstone project, thesis, graduation clearance, grades",
+                "Campus": "student clubs, hackathons, college fests, workshops, campus seminars, student society announcements",
+                "Finance": "tuition fees, fee receipts, scholarships, student loan updates, stipend deposits, bank alerts",
+                "Security": "account security alerts, password resets, 2FA verification codes, student portal access warnings",
+                "Personal": "direct personal emails from friends, family, classmates, peer study groups",
+                "Promotions": "student discounts, retail sales, marketing emails, product newsletters, commercial pitches",
+                "Other": "general communications not matching other categories",
+            },
+        },
+        "urgency": {
+            "type": "score",
+            "instructions": urgency_instr,
+            "criteria": [
+                "low priority / newsletter / promotion / FYI only",
+                "normal priority, review when convenient",
+                "high priority, requires response or attention within 24 hours",
+                "critical priority, urgent deadline, security alert, or blocking issue",
+            ],
+        },
+    }
 
 
 @dataclass
@@ -66,159 +67,91 @@ class TriageResult:
     reason: str
     category: str
     summary: str = ""
-    action_required: bool = False
-
-    def to_dict(self) -> dict:
-        return {
-            "important": self.important,
-            "score": self.score,
-            "reason": self.reason,
-            "category": self.category,
-            "summary": self.summary,
-            "action_required": self.action_required,
-        }
-
-
-class TriageParseError(Exception):
-    pass
 
 
 class TriageUnavailable(Exception):
     pass
 
 
-class TriageRateLimit(Exception):
-    """Raised when the LLM provider returns 429 Too Many Requests."""
-    pass
+def score_from_laya_answers(answers: dict) -> tuple[int, bool, str]:
+    cat_ans = answers.get("category", {})
+    category = cat_ans.get("choice", "Other")
+    if isinstance(category, str):
+        category = category.title()
 
+    urg_ans = answers.get("urgency", {})
+    probs = urg_ans.get("probabilities", {})
 
-def load_custom_rules() -> str:
-    """Load custom triage rules from ~/.inboxzen/triage_rules.md"""
-    if RULES_PATH.exists():
+    if isinstance(probs, dict) and probs:
+        tier_weights = {"0": 15, "1": 45, "2": 75, "3": 95}
+        raw_score = sum(float(prob) * tier_weights.get(str(k), 50) for k, prob in probs.items())
+    elif "score" in urg_ans:
         try:
-            return RULES_PATH.read_text().strip()
-        except Exception:
-            pass
-    RULES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        RULES_PATH.write_text(DEFAULT_RULES)
-    except Exception:
-        pass
-    return DEFAULT_RULES
-
-
-def build_prompt(email: dict, rules: str) -> str:
-    """Build prompt for single email triage."""
-    body = (email.get("body") or email.get("body_text") or "")[:1500]
-    sender = email.get("sender") or email.get("sender_name") or email.get("sender_email") or "Unknown"
-    subject = email.get("subject") or "(no subject)"
-    to_addr = email.get("to") or email.get("recipient_email") or "me"
-
-    return PROMPT_TEMPLATE.format(
-        rules=rules,
-        subject=subject,
-        sender=sender,
-        to=to_addr,
-        body=body,
-    )
-
-
-def extract_json(raw: str) -> dict:
-    """Extract JSON from LLM output, tolerating markdown fences and prose."""
-    if not raw:
-        raise TriageParseError("empty response")
-
-    text = raw.strip()
-
-    m = re.match(r'^\s*```(?:json)?\s*(.*?)\s*```\s*$', text, re.DOTALL)
-    if m:
-        text = m.group(1).strip()
-
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError:
-        pass
-
-    m = re.search(r'\{.*\}', text, re.DOTALL)
-    if m:
-        candidate = m.group(0)
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            for trim in range(1, 20):
-                try:
-                    return json.loads(candidate[:-trim])
-                except json.JSONDecodeError:
-                    continue
-
-    raise TriageParseError(f"Cannot extract JSON from: {raw[:200]}")
-
-
-def coerce_result(parsed: dict) -> TriageResult:
-    """Validate and normalize parsed dict to TriageResult."""
-    raw_score = parsed.get("score") if "score" in parsed else parsed.get("importance_score")
-    try:
-        score = int(round(float(raw_score))) if raw_score is not None else None
-    except (TypeError, ValueError):
-        score = None
-
-    importance = str(parsed.get("importance", "")).strip().lower()
-
-    if score is None or (score == 0 and importance):
-        importance_map = {"critical": 95, "high": 85, "medium": 50, "low": 20}
-        score = importance_map.get(importance, score or 0)
-    elif score is None:
-        score = 0
-
-    score = max(0, min(100, score))
-    category = str(parsed.get("category") or "Other").strip().title() or "Other"
-    important = importance in {"critical", "high"} or score >= 70
-
-    action_raw = parsed.get("action_required", False)
-    if isinstance(action_raw, str):
-        action_required = action_raw.lower() in {"true", "1", "yes"}
+            s = float(urg_ans["score"])
+            raw_score = (s / 3.0) * 100.0
+        except (ValueError, TypeError):
+            raw_score = 50.0
     else:
-        action_required = bool(action_raw)
+        raw_score = 50.0
 
-    reason = str(parsed.get("reason") or "No reason provided.").strip()[:500]
-    summary = str(parsed.get("summary") or "").strip()[:2000]
+    score = int(round(max(0, min(100, raw_score))))
+    important = score >= 70
+    return score, important, category
+
+
+def normalize_laya_model(model: str | None) -> str:
+    """Map any user or DB model string to a valid Laya router checkpoint."""
+    if not model:
+        return "english"
+    m = model.strip().lower()
+    if any(k in m for k in ["multi", "ml"]):
+        return "multilingual"
+    if "decision" in m:
+        return "typed-decisions"
+    return "english"
+
+
+def _predict_laya_sync(state: dict, model: str | None = None, instructions: str = "") -> TriageResult:
+    from app.services.llm_providers import get_laya_router
+    router = get_laya_router(preload=False)
+    if router is None:
+        raise TriageUnavailable("Laya router is not initialized or failed to load")
+
+    laya_model = normalize_laya_model(model)
+
+    # Evict other checkpoints to prevent RAM from accumulating multiple models
+    for loaded_name in list(router.loaded):
+        if loaded_name != laya_model:
+            router.unload(loaded_name)
+
+    questions = get_laya_questions(instructions)
+
+    try:
+        res = router.predict(state, questions, model=laya_model)
+    except Exception as exc:
+        raise TriageUnavailable(f"Laya prediction failed: {exc}") from exc
+
+    answers = res.get("answers", {})
+    score, important, category = score_from_laya_answers(answers)
 
     return TriageResult(
         important=important,
         score=score,
-        reason=reason,
+        reason="",
         category=category,
-        summary=summary,
-        action_required=action_required,
+        summary="",
     )
 
 
-async def scan_email(email: dict, provider: LLMProvider, model: str, rules: str) -> TriageResult:
-    """Scan a single email through the LLM. Async version for API providers."""
-    prompt = build_prompt(email, rules)
-    try:
-        raw = await provider.generate(prompt, model)
-    except Exception as exc:
-        if "429" in str(exc):
-            raise TriageRateLimit(f"Rate limited by {provider.name}") from exc
-        raise TriageUnavailable(f"LLM request failed: {exc}") from exc
-    parsed = extract_json(raw)
-    return coerce_result(parsed)
+async def scan_email(email: dict, model: str | None = None, instructions: str = "") -> TriageResult:
+    """Triage email using local non-autoregressive Laya model."""
+    subject = email.get("subject") or ""
+    sender = email.get("sender") or email.get("sender_name") or email.get("sender_email") or ""
+    body = (email.get("body") or email.get("body_text") or "")[:2000]
 
-
-async def scan_email_with_retry(email: dict, provider: LLMProvider, model: str, rules: str) -> TriageResult:
-    """Scan with retry: Ollama waits 30s on unavailable, rate-limited providers retry once."""
-    try:
-        return await scan_email(email, provider, model, rules)
-    except TriageRateLimit:
-        logger.info("Rate limited by %s, waiting 60s for retry...", provider.name)
-        await asyncio.sleep(60)
-        return await scan_email(email, provider, model, rules)
-    except TriageUnavailable:
-        if provider.name == "ollama":
-            logger.info("Ollama unavailable, retrying in %ds...", UNAVAILABLE_RETRY_SECONDS)
-            await asyncio.sleep(UNAVAILABLE_RETRY_SECONDS)
-            return await scan_email(email, provider, model, rules)
-        raise
+    state = {
+        "subject": subject,
+        "from": sender,
+        "body": body,
+    }
+    return await asyncio.to_thread(_predict_laya_sync, state, model, instructions)

@@ -1,12 +1,12 @@
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
-sqlalchemy>=2.0.23
+sqlalchemy>=2.0.23,<2.1.0
 aiosqlite>=0.19.0
 google-api-python-client>=2.108.0
 google-auth-oauthlib>=1.1.0
 google-auth-httplib2>=0.1.1
-apscheduler>=3.10.4
 python-dotenv>=1.0.0
 jinja2>=3.1.2
 python-multipart>=0.0.6
 httpx>=0.25.2
+laya>=0.3.0

@@ -31,8 +31,11 @@
         <div class="ei-top">
             <span class="dot-sm acct-dot" style="background:{{ email.account.color if email.account else 'var(--ash)' }}" title="{{ email.account.email if email.account else '' }}"></span>
             <span class="ei-sender">{{ sender_name }}</span>
+            {% if email.category and email.category != 'Uncategorized' %}
+            <span class="ei-cat" style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--bone-dim);margin-left:auto;">{{ email.category }}</span>
+            {% endif %}
         </div>
-        <div class="ei-summary">{{ email.summary or email.snippet or email.subject }}</div>
+        <div class="ei-summary">{{ email.snippet or email.subject }}</div>
     </div>
     <div class="ei-right">
         <div class="ei-score">

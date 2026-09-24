@@ -375,6 +375,7 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   border-top: 1px solid var(--line-soft);
 }
 
+.llm-status,
 .ollama-status {
   display: flex;
   align-items: center;
@@ -382,6 +383,7 @@ input, textarea { font-family: inherit; border: none; background: none; outline:
   width: 100%;
 }
 
+.llm-status #llm-label,
 .ollama-status #llm-label {
   font-family: var(--font-mono);
   font-size: 11px;

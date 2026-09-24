@@ -17,13 +17,6 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify"
 ]
 
-# Ollama settings
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-
-# API key settings (for OpenAI/OpenRouter providers)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-
 # Account color palette (for multi-account assignment)
 ACCOUNT_COLORS = [
     "#3B82F6",  # Blue

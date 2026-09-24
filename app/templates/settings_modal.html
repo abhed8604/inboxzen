@@ -36,164 +36,55 @@
     <div class="settings-topbar">
         <div class="settings-topbar-heading">
             <div class="eyebrow">02 · AI engine</div>
-            <h1>Model provider</h1>
-            <p>Pick and configure what powers the triage engine.</p>
+            <h1>Laya Decision Engine</h1>
+            <p>Local-first, fast decision model running on device with calibrated probabilities.</p>
         </div>
         <div class="settings-topbar-right">
             <div class="settings-status-chip">
                 <span class="chip-dot{% if not llm_online %} offline{% endif %}"></span>
-                {% if llm_provider == 'ollama' %}ollama · local{% elif llm_provider == 'openai' %}openai · api{% else %}openrouter · api{% endif %}
+                laya · local
             </div>
             <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
         </div>
     </div>
     <div class="settings-content">
+        <!-- Laya Memory Status Card -->
+        <div class="key-card-container" style="margin-bottom: 24px;">
+            <div class="key-card-header">
+                <span class="settings-field-label" style="margin:0;">Laya Memory Status</span>
+                <span id="settings-laya-badge" class="key-status-badge {% if llm_loaded %}db{% else %}none{% endif %}">
+                    {% if llm_loaded %}✓ Loaded in RAM (Ready){% else %}○ Unloaded from RAM{% endif %}
+                </span>
+            </div>
+            <p class="settings-field-hint">Preloaded into memory at startup for sub-50ms triage without spin-up delay. You can unload or reload anytime.</p>
+            <div class="key-actions-row">
+                <button id="settings-laya-load-btn" type="button" class="settings-btn settings-btn-primary"
+                        hx-post="/laya/load" hx-target="#toast-container" hx-swap="beforeend"
+                        style="{% if llm_loaded %}display:none;{% endif %}">
+                    Load Laya into RAM
+                </button>
+                <button id="settings-laya-unload-btn" type="button" class="settings-btn settings-btn-ghost"
+                        hx-post="/laya/unload" hx-target="#toast-container" hx-swap="beforeend"
+                        style="{% if not llm_loaded %}display:none;{% endif %}">
+                    Unload from RAM
+                </button>
+            </div>
+        </div>
+
+        <!-- Laya Model Selection -->
         <div class="settings-field-block">
-            <p class="settings-field-label">Provider</p>
-            <div class="settings-segmented" id="settingsProviderSeg">
-                <button class="settings-seg-btn {% if llm_provider == 'ollama' %}active accent{% endif %}" onclick="settingsShowProvider('ollama', this)">Ollama (Local)</button>
-                <button class="settings-seg-btn {% if llm_provider == 'openai' %}active{% endif %}" onclick="settingsShowProvider('openai', this)">OpenAI</button>
-                <button class="settings-seg-btn {% if llm_provider == 'openrouter' %}active{% endif %}" onclick="settingsShowProvider('openrouter', this)">OpenRouter</button>
-            </div>
-            <p class="settings-field-hint">Ollama keeps every email on this machine. Cloud API providers allow parallel scoring for higher throughput.</p>
-        </div>
-
-        <!-- Ollama Config -->
-        <div id="settings-provider-ollama" class="settings-provider-block" style="{% if llm_provider != 'ollama' %}display:none;{% endif %}">
-            <div class="settings-field-block">
-                <p class="settings-field-label">Local model</p>
-                <form hx-post="/settings/model" hx-target="#toast-container" hx-swap="beforeend">
-                    {% if ollama_models %}
-                    <select name="model" class="settings-select">
-                        <option value="">Select a model...</option>
-                        {% for model in ollama_models %}
-                        <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }}</option>
-                        {% endfor %}
-                    </select>
-                    {% else %}
-                    <input type="text" name="model" class="settings-input" value="{{ selected_model }}" placeholder="e.g. llama3.2">
-                    <p class="settings-field-hint">Could not connect to Ollama at {{ ollama_host or 'localhost:11434' }}</p>
-                    {% endif %}
-                    <div style="margin-top: 12px;">
-                        <button type="submit" class="settings-btn settings-btn-primary">Save model</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- OpenAI Config -->
-        <div id="settings-provider-openai" class="settings-provider-block" style="{% if llm_provider != 'openai' %}display:none;{% endif %}">
-            <div class="key-card-container">
-                <div class="key-card-header">
-                    <span class="settings-field-label" style="margin:0;">OpenAI API Key</span>
-                    {% if openai_key_source == 'db' %}
-                    <span class="key-status-badge db">✓ Active in Database</span>
-                    {% elif openai_key_source == 'env' %}
-                    <span class="key-status-badge env">✓ Active via .env</span>
-                    {% else %}
-                    <span class="key-status-badge none">✕ No Key Configured</span>
-                    {% endif %}
-                </div>
-                <form id="openaiKeyForm" hx-post="/settings/openai-key" hx-target="#toast-container" hx-swap="beforeend">
-                    <div class="api-key-input-wrapper">
-                        <input type="password" id="openai_api_key_input" name="api_key" class="settings-input" placeholder="sk-proj-..."
-                               {% if openai_key_set %}value="••••••••••••••••••••"{% endif %}
-                               onfocus="if(this.value.indexOf('•••')!==-1)this.value='';">
-                        <button type="button" class="key-toggle-btn" onclick="toggleKeyVisibility('openai_api_key_input', this)" title="Show/Hide Key">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </button>
-                    </div>
-                    <p class="settings-field-hint">Keys are stored locally in your database or read from .env. Never sent to any third party.</p>
-                    <div class="key-actions-row">
-                        <button type="submit" class="settings-btn settings-btn-primary">Save Key</button>
-                        <button type="button" class="settings-btn settings-btn-secondary" hx-post="/settings/verify-key" hx-vals='{"provider": "openai"}' hx-include="#openai_api_key_input" hx-target="#toast-container" hx-swap="beforeend">Test Connection</button>
-                        {% if openai_key_set %}
-                        <button type="button" class="settings-btn settings-btn-ghost" onclick="clearKeyInput('openai_api_key_input'); hxSubmitForm('openaiKeyForm');">Clear Key</button>
-                        {% endif %}
-                    </div>
-                </form>
-            </div>
-
-            <div class="settings-field-block" style="margin-top: 24px;">
-                <p class="settings-field-label">Model Selection</p>
-                <form id="openaiModelForm" hx-post="/settings/model" hx-target="#toast-container" hx-swap="beforeend">
-                    <input type="text" id="openai_model_input" name="model" class="settings-input" value="{{ openai_model }}" placeholder="gpt-4o">
-                    <div class="model-quick-pills">
-                        <span class="model-pill" onclick="document.getElementById('openai_model_input').value='gpt-4o'">gpt-4o</span>
-                        <span class="model-pill" onclick="document.getElementById('openai_model_input').value='gpt-4o-mini'">gpt-4o-mini</span>
-                        <span class="model-pill" onclick="document.getElementById('openai_model_input').value='gpt-4-turbo'">gpt-4-turbo</span>
-                        <span class="model-pill" onclick="document.getElementById('openai_model_input').value='o3-mini'">o3-mini</span>
-                    </div>
-                    <div style="margin-top: 12px;">
-                        <button type="submit" class="settings-btn settings-btn-primary">Save Model</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- OpenRouter Config -->
-        <div id="settings-provider-openrouter" class="settings-provider-block" style="{% if llm_provider != 'openrouter' %}display:none;{% endif %}">
-            <div class="key-card-container">
-                <div class="key-card-header">
-                    <span class="settings-field-label" style="margin:0;">OpenRouter API Key</span>
-                    {% if openrouter_key_source == 'db' %}
-                    <span class="key-status-badge db">✓ Active in Database</span>
-                    {% elif openrouter_key_source == 'env' %}
-                    <span class="key-status-badge env">✓ Active via .env</span>
-                    {% else %}
-                    <span class="key-status-badge none">✕ No Key Configured</span>
-                    {% endif %}
-                </div>
-                <form id="openrouterKeyForm" hx-post="/settings/openrouter-key" hx-target="#toast-container" hx-swap="beforeend">
-                    <div class="api-key-input-wrapper">
-                        <input type="password" id="openrouter_api_key_input" name="api_key" class="settings-input" placeholder="sk-or-v1-..."
-                               {% if openrouter_key_set %}value="••••••••••••••••••••"{% endif %}
-                               onfocus="if(this.value.indexOf('•••')!==-1)this.value='';">
-                        <button type="button" class="key-toggle-btn" onclick="toggleKeyVisibility('openrouter_api_key_input', this)" title="Show/Hide Key">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </button>
-                    </div>
-                    <p class="settings-field-hint">Access 200+ models via openrouter.ai with a single unified key.</p>
-                    <div class="key-actions-row">
-                        <button type="submit" class="settings-btn settings-btn-primary">Save Key</button>
-                        <button type="button" class="settings-btn settings-btn-secondary" hx-post="/settings/verify-key" hx-vals='{"provider": "openrouter"}' hx-include="#openrouter_api_key_input" hx-target="#toast-container" hx-swap="beforeend">Test Connection</button>
-                        {% if openrouter_key_set %}
-                        <button type="button" class="settings-btn settings-btn-ghost" onclick="clearKeyInput('openrouter_api_key_input'); hxSubmitForm('openrouterKeyForm');">Clear Key</button>
-                        {% endif %}
-                    </div>
-                </form>
-            </div>
-
-            <div class="settings-field-block" style="margin-top: 24px;">
-                <p class="settings-field-label">Model Selection</p>
-                <div style="position: relative;" id="settings-or-model-search">
-                    <input type="text" id="settings-or-model-input" class="settings-input" placeholder="Search models (e.g. claude, deepseek, llama)..." autocomplete="off" value="{{ openrouter_model }}">
-                    <input type="hidden" id="settings-or-model-hidden" value="{{ openrouter_model }}">
-                    <div id="settings-or-model-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; max-height:320px; overflow-y:auto; background:#1C212E; border:1px solid #242A38; border-radius:8px; z-index:100; margin-top:4px; box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
-                </div>
-                <div class="model-quick-pills">
-                    <span class="model-pill" onclick="settingsSelectORModel('anthropic/claude-3.5-sonnet')">claude-3.5-sonnet</span>
-                    <span class="model-pill" onclick="settingsSelectORModel('deepseek/deepseek-r1')">deepseek-r1</span>
-                    <span class="model-pill" onclick="settingsSelectORModel('google/gemini-2.0-flash-001')">gemini-2.0-flash</span>
-                    <span class="model-pill" onclick="settingsSelectORModel('meta-llama/llama-3.3-70b-instruct')">llama-3.3-70b</span>
-                </div>
+            <p class="settings-field-label">Model Checkpoint</p>
+            <form hx-post="/settings/model" hx-target="#toast-container" hx-swap="beforeend">
+                <select name="model" class="settings-select">
+                    {% for model in laya_models %}
+                    <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }}</option>
+                    {% endfor %}
+                </select>
+                <p class="settings-field-hint">ModernBERT-large decision backbone (421M). Predicts urgency and category without token-by-token generation.</p>
                 <div style="margin-top: 12px;">
-                    <button type="button" class="settings-btn settings-btn-primary" onclick="settingsSaveOpenRouterModel()">Save Model</button>
+                    <button type="submit" class="settings-btn settings-btn-primary">Save model</button>
                 </div>
-            </div>
-        </div>
-
-        <!-- Parallel Requests (API providers only) -->
-        <div id="settings-parallel-section" class="settings-provider-block" style="{% if llm_provider == 'ollama' %}display:none;{% endif %}">
-            <div class="settings-divider"></div>
-            <div class="settings-field-block">
-                <p class="settings-field-label">Parallel requests</p>
-                <p class="settings-field-hint" style="margin-top:0; margin-bottom:10px;">Concurrent API requests. Higher = faster triage but may reach provider rate limits.</p>
-                <form hx-post="/settings/parallel-requests" hx-target="#toast-container" hx-swap="beforeend" style="display:flex; align-items:center; gap:10px;">
-                    <input type="number" name="count" class="settings-input" value="{{ parallel_requests }}" min="1" max="20" step="1" style="width:100px;">
-                    <button type="submit" class="settings-btn settings-btn-primary">Save Concurrency</button>
-                </form>
-            </div>
+            </form>
         </div>
     </div>
 </div>
@@ -205,43 +96,23 @@
     <div class="settings-topbar">
         <div class="settings-topbar-heading">
             <div class="eyebrow">03 · Triage rules</div>
-            <h1>Scoring prompt</h1>
-            <p>Guides how the model ranks incoming mail.</p>
+            <h1>Classification Instructions</h1>
+            <p>Rules and priorities guiding how the Laya model scores and categorizes incoming mail.</p>
         </div>
         <div class="settings-topbar-right">
             <button class="settings-close-x" onclick="document.getElementById('settings-modal').classList.add('hidden')">&times;</button>
         </div>
     </div>
-    <div class="settings-content settings-content-stretch">
-        <!-- Prompt Editor Card -->
-        <div class="prompt-editor-card">
-            <div class="prompt-editor-header">
-                <div class="prompt-file-tab">
-                    <span class="file-dot"></span>
-                    <span class="file-name">system_prompt.md</span>
+    <div class="settings-content">
+        <div class="settings-field-block">
+            <p class="settings-field-label">Custom Priority Rules</p>
+            <form hx-post="/settings/ai-rules" hx-target="#toast-container" hx-swap="beforeend">
+                <textarea name="rules" class="settings-textarea" style="width:100%;height:180px;font-family:var(--font-mono);font-size:12.5px;line-height:1.6;padding:12px;background:var(--g-900);border:1px solid var(--line);border-radius:6px;color:var(--bone);resize:vertical;" spellcheck="false">{{ ai_rules }}</textarea>
+                <p class="settings-field-hint" style="margin-top:6px;">Laya uses these instructions to determine urgency score and category.</p>
+                <div style="margin-top:12px;">
+                    <button type="submit" class="settings-btn settings-btn-primary">Save instructions</button>
                 </div>
-                <div class="prompt-editor-meta">
-                    <span id="settingsTokenEstimate" class="prompt-meta-badge">~0 tokens</span>
-                    <span id="settingsCharCount" class="prompt-meta-badge">— characters</span>
-                </div>
-            </div>
-            <div class="settings-editor">
-                <div class="settings-editor-gutter" id="settingsGutter"></div>
-                <textarea id="settingsRulesArea" spellcheck="false" wrap="off">{{ ai_rules }}</textarea>
-            </div>
-            <div class="prompt-editor-footer">
-                <div class="prompt-routing-guide">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="guide-icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                    <span>Scores ≥70 land in <strong>Important</strong>, scores &lt;50 go to <strong>All Mail</strong>.</span>
-                </div>
-                <form hx-post="/settings/ai-rules" hx-target="#toast-container" hx-swap="beforeend">
-                    <input type="hidden" name="rules" id="settingsRulesHidden">
-                    <button type="submit" class="settings-btn settings-btn-primary" onclick="document.getElementById('settingsRulesHidden').value=document.getElementById('settingsRulesArea').value">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px; height:14px; margin-right:4px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                        Save Prompt Rules
-                    </button>
-                </form>
-            </div>
+            </form>
         </div>
     </div>
 </div>
@@ -349,209 +220,4 @@ function settingsSetTheme(theme, card) {
         if (toast) toast.insertAdjacentHTML('beforeend', html);
     });
 }
-
-/* ── Provider switching ──────────────────────────── */
-function settingsShowProvider(provider, btn) {
-    document.querySelectorAll('#settingsProviderSeg .settings-seg-btn').forEach(function(b) {
-        b.classList.remove('active', 'accent');
-    });
-    btn.classList.add('active');
-    if (provider === 'ollama') btn.classList.add('accent');
-
-    document.querySelectorAll('.settings-provider-block').forEach(function(el) { el.style.display = 'none'; });
-    var block = document.getElementById('settings-provider-' + provider);
-    if (block) block.style.display = '';
-
-    var parallelSection = document.getElementById('settings-parallel-section');
-    if (parallelSection) {
-        parallelSection.style.display = provider === 'ollama' ? 'none' : '';
-    }
-
-    fetch('/settings/provider', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'provider=' + encodeURIComponent(provider)
-    })
-    .then(function(r) { return r.text(); })
-    .then(function(html) {
-        var toast = document.getElementById('toast-container');
-        if (toast) toast.insertAdjacentHTML('beforeend', html);
-    });
-}
-
-/* ── Key Input Helpers ───────────────────────────── */
-function toggleKeyVisibility(inputId, btn) {
-    var input = document.getElementById(inputId);
-    if (!input) return;
-    if (input.type === 'password') {
-        input.type = 'text';
-        btn.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
-    } else {
-        input.type = 'password';
-        btn.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-    }
-}
-
-function clearKeyInput(inputId) {
-    var input = document.getElementById(inputId);
-    if (input) {
-        input.value = '';
-        input.type = 'text';
-        input.focus();
-    }
-}
-
-function hxSubmitForm(formId) {
-    var form = document.getElementById(formId);
-    if (form && window.htmx) {
-        htmx.trigger(form, 'submit');
-    }
-}
-
-/* ── Code editor (line numbers + char count + wheel scroll sync) ─ */
-(function() {
-    var area = document.getElementById('settingsRulesArea');
-    var gutter = document.getElementById('settingsGutter');
-    var charCount = document.getElementById('settingsCharCount');
-    if (!area || !gutter) return;
-
-    function renderGutter() {
-        var lines = area.value.split('\n').length;
-        var out = '';
-        for (var i = 1; i <= lines; i++) out += i + '\n';
-        gutter.textContent = out;
-        gutter.scrollTop = area.scrollTop;
-        if (charCount) charCount.textContent = area.value.length.toLocaleString() + ' characters';
-        var tokenEst = document.getElementById('settingsTokenEstimate');
-        if (tokenEst) tokenEst.textContent = '~' + Math.round(area.value.length / 4).toLocaleString() + ' tokens';
-    }
-
-    function syncScroll() {
-        gutter.scrollTop = area.scrollTop;
-    }
-
-    area.addEventListener('input', renderGutter);
-    area.addEventListener('scroll', syncScroll);
-    area.addEventListener('keyup', syncScroll);
-    area.addEventListener('mouseup', syncScroll);
-    gutter.addEventListener('wheel', function(e) {
-        area.scrollTop += e.deltaY;
-        area.scrollLeft += e.deltaX;
-    }, { passive: true });
-
-    renderGutter();
-
-    var pane = document.getElementById('section-rules');
-    if (pane && typeof MutationObserver !== 'undefined') {
-        var observer = new MutationObserver(function() {
-            if (pane.classList.contains('active')) {
-                renderGutter();
-                syncScroll();
-            }
-        });
-        observer.observe(pane, { attributes: true, attributeFilter: ['class'] });
-    }
-})();
-
-/* ── OpenRouter model search ─────────────────────── */
-var settingsORModels = [];
-var settingsORLoaded = false;
-
-function settingsLoadORModels() {
-    if (settingsORLoaded) return;
-    fetch('/settings/api/models/openrouter')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            settingsORModels = data.models || [];
-            settingsORLoaded = true;
-            settingsRenderORModels(document.getElementById('settings-or-model-input').value);
-        })
-        .catch(function() { settingsORLoaded = true; });
-}
-
-function settingsRenderORModels(query) {
-    var dropdown = document.getElementById('settings-or-model-dropdown');
-    if (!dropdown) return;
-    var current = document.getElementById('settings-or-model-hidden').value;
-    var filtered = settingsORModels;
-    if (query && query.length > 0) {
-        var q = query.toLowerCase();
-        filtered = settingsORModels.filter(function(m) {
-            return m.id.toLowerCase().indexOf(q) !== -1 || (m.name && m.name.toLowerCase().indexOf(q) !== -1);
-        });
-    }
-    var html = '';
-    var shown = 0;
-    for (var i = 0; i < filtered.length && shown < 50; i++) {
-        var m = filtered[i];
-        var sel = m.id === current ? ' background:#7FE8C015; border-left:3px solid #7FE8C0;' : '';
-        var price = '';
-        if (m.prompt_price !== undefined) {
-            price = ' ($' + m.prompt_price.toFixed(7) + '/tok in, $' + m.completion_price.toFixed(7) + '/tok out)';
-        }
-        var ctx = m.context_length ? ' [' + (m.context_length / 1000).toFixed(0) + 'k]' : '';
-        html += '<div style="padding:10px 14px; cursor:pointer; border-bottom:1px solid #242A38; font-family:IBM Plex Mono,monospace; font-size:12px;' + sel + '" onclick="settingsSelectORModel(\'' + m.id.replace(/'/g, "\\'") + '\')" onmouseover="this.style.background=\'#7FE8C010\'" onmouseout="this.style.background=\'' + (sel ? '#7FE8C015' : 'transparent') + '\'">' +
-                '<div style="font-size:13px; font-weight:500; color:#ECE8DE; font-family:IBM Plex Sans,sans-serif;">' + (m.name || m.id) + '</div>' +
-                '<div style="font-size:11px; color:#565C6C; margin-top:2px;">' + m.id + ctx + price + '</div>' +
-                '</div>';
-        shown++;
-    }
-    if (shown === 0 && settingsORModels.length > 0) {
-        html = '<div style="padding:10px 14px; color:#565C6C; font-style:italic;">No models match your search</div>';
-    } else if (settingsORModels.length === 0) {
-        html = '<div style="padding:10px 14px; color:#565C6C; font-style:italic;">No models available. Check network or key.</div>';
-    }
-    dropdown.innerHTML = html;
-    if (query || filtered.length > 0) dropdown.style.display = 'block';
-}
-
-function settingsSelectORModel(id) {
-    document.getElementById('settings-or-model-hidden').value = id;
-    document.getElementById('settings-or-model-input').value = id;
-    document.getElementById('settings-or-model-dropdown').style.display = 'none';
-}
-
-function settingsSaveOpenRouterModel() {
-    var model = document.getElementById('settings-or-model-hidden').value;
-    if (!model) { alert('Please select a model first'); return; }
-    fetch('/settings/model', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'model=' + encodeURIComponent(model)
-    })
-    .then(function(r) { return r.text(); })
-    .then(function(html) {
-        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
-    });
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    var searchInput = document.getElementById('settings-or-model-input');
-    var dropdown = document.getElementById('settings-or-model-dropdown');
-
-    if (searchInput) {
-        searchInput.addEventListener('focus', function() {
-            settingsLoadORModels();
-            settingsRenderORModels(this.value);
-        });
-        searchInput.addEventListener('input', function() {
-            document.getElementById('settings-or-model-hidden').value = this.value;
-            settingsRenderORModels(this.value);
-        });
-        searchInput.addEventListener('click', function(e) {
-            e.stopPropagation();
-            settingsLoadORModels();
-            settingsRenderORModels(this.value);
-        });
-    }
-
-    document.addEventListener('click', function(e) {
-        if (dropdown && !e.target.closest('#settings-or-model-search')) {
-            dropdown.style.display = 'none';
-        }
-    });
-    if (dropdown) {
-        dropdown.addEventListener('click', function(e) { e.stopPropagation(); });
-    }
-});
 </script>

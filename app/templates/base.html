@@ -76,14 +76,23 @@
             </div>
 
             <div class="sidebar-footer">
-                <div class="ollama-status" id="ollama-status">
-                    <span id="llm-dot" class="status-dot"></span>
-                    <span id="llm-label">{% if llm_provider is defined and llm_provider == 'ollama' %}Ollama{% else %}API{% endif %} {% if llm_loaded is defined and llm_loaded %}Loaded{% elif llm_online is defined and llm_online %}Online{% else %}Offline{% endif %}</span>
-                    <button id="llm-unload-btn" class="ollama-unload-btn"
-                            hx-post="/ollama/unload" hx-target="#toast-container" hx-swap="beforeend"
-                            title="Unload model from GPU">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-                    </button>
+                <div class="llm-status" id="llm-status" style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span id="llm-dot" class="status-dot"></span>
+                        <span id="llm-label">Laya {% if llm_loaded %}Ready{% else %}Unloaded{% endif %}</span>
+                    </div>
+                    <div id="llm-action-btn-container">
+                        <button id="llm-unload-btn" class="ollama-unload-btn{% if not llm_loaded %} hidden{% endif %}"
+                                hx-post="/laya/unload" hx-target="#toast-container" hx-swap="beforeend"
+                                title="Unload Laya from RAM">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                        </button>
+                        <button id="llm-load-btn" class="ollama-unload-btn{% if llm_loaded %} hidden{% endif %}" style="opacity:0.75;"
+                                hx-post="/laya/load" hx-target="#toast-container" hx-swap="beforeend"
+                                title="Load Laya into RAM">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         </aside>
@@ -112,10 +121,10 @@
             </div>
 
             <div class="email-list" id="email-list">
-                {% if emails is defined %}
-                {% for email in emails %}
-                {% include "partials/email_card.html" %}
-                {% endfor %}
+                {% if emails is defined and emails %}
+                {% include "partials/email_list_items.html" %}
+                {% else %}
+                <div class="empty-list-msg" style="padding:24px;text-align:center;color:var(--ash);font-size:13px;">No emails found</div>
                 {% endif %}
             </div>
         </div>
@@ -178,7 +187,7 @@
                 </div>
                 <div class="settings-nav-foot">
                     <span class="settings-nav-dot{% if not llm_online is defined or not llm_online %} offline{% endif %}" id="settings-nav-dot"></span>
-                    <span id="settings-nav-foot-label">{% if llm_provider is defined and llm_provider == 'ollama' %}local model active{% else %}api connected{% endif %}</span>
+                    <span id="settings-nav-foot-label">{% if llm_provider is defined and llm_provider == 'laya' %}laya active{% else %}api connected{% endif %}</span>
                 </div>
             </nav>
             <!-- Right Pane (HTMX loads content here) -->
@@ -218,13 +227,29 @@
         }
 
         function toggleAccount(btn, accountId) {
-            var currentTab = '{{ selected_tab if selected_tab is defined else "important" }}';
-            var url = '/?tab=' + currentTab;
             var currentAccountId = new URLSearchParams(window.location.search).get('account_id');
-            if (currentAccountId !== String(accountId)) {
-                url += '&account_id=' + accountId;
+            var targetAccountId = currentAccountId !== String(accountId) ? accountId : '';
+
+            document.querySelectorAll('.mailbox-item').forEach(function(item) {
+                item.classList.remove('active');
+            });
+            if (targetAccountId) {
+                btn.classList.add('active');
             }
-            window.location.href = url;
+
+            var currentParams = new URLSearchParams(window.location.search);
+            if (targetAccountId) currentParams.set('account_id', targetAccountId);
+            else currentParams.delete('account_id');
+
+            var newSearch = currentParams.toString();
+            var pageUrl = '/?' + newSearch;
+            window.history.replaceState({}, '', pageUrl);
+
+            if (window.refreshInboxList) {
+                window.refreshInboxList();
+            } else {
+                window.location.href = pageUrl;
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -262,15 +287,9 @@
             var llmDot = document.getElementById('llm-dot');
             var llmLabel = document.getElementById('llm-label');
             var llmUnloadBtn = document.getElementById('llm-unload-btn');
-            var currentProvider = '{{ llm_provider if llm_provider is defined else "ollama" }}';
+            var currentProvider = '{{ llm_provider if llm_provider is defined else "laya" }}';
             var scanMode = 'scan';
             var isScanning = false;
-
-            function getProviderName(provider) {
-                if (provider === 'openai') return 'OpenAI';
-                if (provider === 'openrouter') return 'OpenRouter';
-                return 'Ollama';
-            }
 
             function applyLLMColor(state) {
                 llmDot.className = 'status-dot ' + state;
@@ -284,68 +303,99 @@
             }
 
             var wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            var ws = new WebSocket(wsProtocol + window.location.host + '/ws');
-
-            ws.onmessage = function(event) {
-                var data = JSON.parse(event.data);
-
-                if (data.type === 'scan_start') {
-                    isScanning = true;
-                    scanProgress.classList.remove('hidden');
-                    scanFill.style.width = '0%';
-                    scanMode = data.mode || 'scan';
-                    var label = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
-                    scanText.textContent = label + '... 0 / ' + data.total;
-                    applyLLMColor('scanning');
-                    llmLabel.textContent = label;
+            var ws;
+            function connectWS() {
+                try {
+                    ws = new WebSocket(wsProtocol + window.location.host + '/ws');
+                } catch(e) {
+                    setTimeout(connectWS, 3000);
+                    return;
                 }
 
-                if (data.type === 'scan_progress') {
-                    var pct = data.total > 0 ? Math.round((data.done / data.total) * 100) : 0;
-                    scanFill.style.width = pct + '%';
-                    var progressLabel = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
-                    scanText.textContent = progressLabel + '... ' + data.done + ' / ' + data.total;
-                }
+                ws.onmessage = function(event) {
+                    var data = JSON.parse(event.data);
 
-                if (data.type === 'scan_end') {
-                    isScanning = false;
-                    scanProgress.classList.add('hidden');
-                    scanFill.style.width = '0%';
-                    fetchStatus();
-                    setTimeout(function() { location.reload(); }, 2000);
-                }
+                    if (data.type === 'scan_start') {
+                        isScanning = true;
+                        scanProgress.classList.remove('hidden');
+                        scanFill.style.width = '0%';
+                        scanMode = data.mode || 'scan';
+                        var label = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
+                        scanText.textContent = label + '... 0 / ' + data.total;
+                        applyLLMColor('scanning');
+                        llmLabel.textContent = label;
+                    }
 
-                if (data.type === 'ollama_status') {
-                    if (data.status === 'unloaded') {
-                        if (!isScanning) {
-                            applyLLMColor('idle');
-                            llmLabel.textContent = getProviderName(currentProvider);
+                    if (data.type === 'scan_progress') {
+                        var pct = data.total > 0 ? Math.round((data.done / data.total) * 100) : 0;
+                        scanFill.style.width = pct + '%';
+                        var progressLabel = scanMode === 'rescan' ? 'Rescanning' : 'Scanning';
+                        scanText.textContent = progressLabel + '... ' + data.done + ' / ' + data.total;
+                    }
+
+                    if (data.type === 'scan_end') {
+                        isScanning = false;
+                        scanProgress.classList.add('hidden');
+                        scanFill.style.width = '0%';
+                        fetchStatus();
+                        if (window.refreshInboxList) {
+                            window.refreshInboxList();
+                        } else {
+                            setTimeout(function() { location.reload(); }, 1500);
                         }
                     }
-                }
-            };
 
-            ws.onclose = function() {
-                scanProgress.classList.add('hidden');
-                if (!isScanning) fetchStatus();
-                setTimeout(function() { location.reload(); }, 5000);
-            };
+                    if (data.type === 'llm_status' || data.type === 'ollama_status') {
+                        if (data.status === 'loaded' || data.status === 'ready') {
+                            updateLLMStatusUI({provider: currentProvider, online: true, loaded: true});
+                        } else if (data.status === 'unloaded') {
+                            updateLLMStatusUI({provider: currentProvider, online: true, loaded: false});
+                        }
+                    }
+                };
+
+                ws.onclose = function() {
+                    scanProgress.classList.add('hidden');
+                    if (!isScanning) fetchStatus();
+                    setTimeout(connectWS, 3000);
+                };
+            }
+            connectWS();
 
             function updateLLMStatusUI(status) {
                 var provider = status.provider || currentProvider;
                 currentProvider = provider;
-                var label = getProviderName(provider);
+                var isLoaded = status.loaded;
+                var isOnline = status.online;
+                var btnContainer = document.getElementById('llm-action-btn-container');
 
                 if (isScanning) {
                     applyLLMColor('scanning');
                     llmLabel.textContent = (scanMode === 'rescan' ? 'Rescanning' : 'Scanning');
-                    if (llmUnloadBtn) llmUnloadBtn.style.display = 'none';
+                    if (btnContainer) btnContainer.style.display = 'none';
                     return;
                 }
 
-                applyLLMColor('idle');
-                llmLabel.textContent = label;
-                if (llmUnloadBtn) llmUnloadBtn.style.display = 'none';
+                if (btnContainer) btnContainer.style.display = '';
+
+                // Update settings modal controls if present
+                var settingsBadge = document.getElementById('settings-laya-badge');
+                var settingsLoadBtn = document.getElementById('settings-laya-load-btn');
+                var settingsUnloadBtn = document.getElementById('settings-laya-unload-btn');
+                if (settingsBadge) {
+                    settingsBadge.textContent = isLoaded ? '✓ Loaded in RAM (Ready)' : '○ Unloaded from RAM';
+                    settingsBadge.className = 'key-status-badge ' + (isLoaded ? 'db' : 'none');
+                    if (settingsLoadBtn) settingsLoadBtn.style.display = isLoaded ? 'none' : 'inline-flex';
+                    if (settingsUnloadBtn) settingsUnloadBtn.style.display = isLoaded ? 'inline-flex' : 'none';
+                }
+
+                applyLLMColor(isLoaded ? 'idle' : 'offline');
+                llmLabel.textContent = isLoaded ? 'Laya Ready' : 'Laya Unloaded';
+
+                var unloadBtn = document.getElementById('llm-unload-btn');
+                var loadBtn = document.getElementById('llm-load-btn');
+                if (unloadBtn) unloadBtn.classList.toggle('hidden', !isLoaded);
+                if (loadBtn) loadBtn.classList.toggle('hidden', isLoaded);
             }
 
             setInterval(fetchStatus, 5000);

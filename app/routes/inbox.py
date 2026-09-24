@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 import ipaddress
 import logging
@@ -13,16 +14,18 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, or_, func
+from sqlalchemy.orm import selectinload, defer
 
 from app.database import get_db
 from app.models import Email, Account, Settings
 from app.utils import _toast, _get_llm_ctx, get_selected_model
-from app.services.gmail_sync import sync_all_accounts, mark_email_read
+from app.services.gmail_sync import sync_all_accounts, sync_and_triage
 from app.services.triage_runner import run_triage_scan, request_cancel, _scan_state
-from app.services.llm_triage import scan_email, load_custom_rules, TriageRateLimit
-from app.services.llm_providers import get_provider
+from app.services.llm_providers import is_laya_loaded, load_laya, unload_laya
+from app.services.llm_triage import scan_email
+from app.auth.google_oauth import get_gmail_service
+from app.websocket_manager import broadcast
 
 router = APIRouter(tags=["inbox"])
 logger = logging.getLogger(__name__)
@@ -37,8 +40,13 @@ def _email_query(account_id: Optional[int] = None, q: Optional[str] = None, impo
     """Build the base email query with optional filters."""
     stmt = (
         select(Email)
-        .options(selectinload(Email.account), selectinload(Email.attachments))
+        .options(
+            defer(Email.body),
+            selectinload(Email.account),
+            selectinload(Email.attachments),
+        )
         .where(Email.is_archived == False)
+        .order_by(Email.received_at.desc().nullslast())
     )
     if account_id:
         stmt = stmt.where(Email.account_id == account_id)
@@ -94,9 +102,7 @@ def extract_links(body_text: str) -> list:
 async def _fetch_inbox_emails(db: AsyncSession, account_id: Optional[int], tab: Optional[str], q: Optional[str]):
     query = _email_query(account_id, q, important_only=(tab == "important"))
     result = await db.execute(query)
-    emails = list(result.scalars().all())
-    emails.sort(key=lambda e: -(e.received_at.timestamp() if e.received_at else 0))
-    return emails
+    return list(result.scalars().all())
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -107,32 +113,37 @@ async def inbox(
     q: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    emails = await _fetch_inbox_emails(db, account_id, tab, q)
-
     accounts_result = await db.execute(select(Account))
     accounts = accounts_result.scalars().all()
 
-    all_emails_result = await db.execute(
-        select(Email).where(Email.is_archived == False)
-    )
-    all_emails = all_emails_result.scalars().all()
+    total_count = (await db.execute(
+        select(func.count(Email.id)).where(Email.is_archived == False)
+    )).scalar_one() or 0
 
-    if not all_emails and accounts:
-        new_emails = await sync_all_accounts(db)
-        if new_emails:
-            await run_triage_scan(db)
-        all_emails_result = await db.execute(
-            select(Email).where(Email.is_archived == False)
+    if total_count == 0 and accounts:
+        await sync_and_triage(db)
+        total_count = (await db.execute(
+            select(func.count(Email.id)).where(Email.is_archived == False)
+        )).scalar_one() or 0
+
+    unread_count = (await db.execute(
+        select(func.count(Email.id)).where(Email.is_archived == False, Email.is_read == False)
+    )).scalar_one() or 0
+
+    important_count = (await db.execute(
+        select(func.count(Email.id)).where(Email.is_archived == False, Email.relevance_score >= IMPORTANT_SCORE)
+    )).scalar_one() or 0
+
+    emails = await _fetch_inbox_emails(db, account_id, tab, q)
+
+    selected_email = None
+    if emails:
+        first_email_res = await db.execute(
+            select(Email)
+            .options(selectinload(Email.account), selectinload(Email.attachments))
+            .where(Email.id == emails[0].id)
         )
-        all_emails = all_emails_result.scalars().all()
-        emails = await _fetch_inbox_emails(db, account_id, tab, q)
-
-    unread_count = sum(1 for e in all_emails if not e.is_read)
-    important_count = sum(1 for e in all_emails if (e.relevance_score or 0) >= IMPORTANT_SCORE)
-    selected_email = emails[0] if emails else None
-    if selected_email and not selected_email.attachments:
-        from app.services.gmail_sync import sync_email_attachments
-        await sync_email_attachments(selected_email, db)
+        selected_email = first_email_res.scalar_one_or_none()
 
     theme_result = await db.execute(select(Settings).where(Settings.key == "theme"))
     theme_setting = theme_result.scalar_one_or_none()
@@ -153,11 +164,57 @@ async def inbox(
             "search_query": q or "",
             "unread_count": unread_count,
             "important_count": important_count,
-            "total_count": len(all_emails),
+            "total_count": total_count,
             "get_time_ago": get_time_ago,
             "theme": theme,
             **llm_ctx,
         }
+    )
+
+
+@router.get("/inbox/list", response_class=HTMLResponse)
+async def inbox_list(
+    request: Request,
+    account_id: Optional[int] = Query(None),
+    tab: Optional[str] = Query("important"),
+    q: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    emails = await _fetch_inbox_emails(db, account_id, tab, q)
+
+    unread_count = (await db.execute(
+        select(func.count(Email.id)).where(Email.is_archived == False, Email.is_read == False)
+    )).scalar_one() or 0
+
+    important_count = (await db.execute(
+        select(func.count(Email.id)).where(Email.is_archived == False, Email.relevance_score >= IMPORTANT_SCORE)
+    )).scalar_one() or 0
+
+    total_count = (await db.execute(
+        select(func.count(Email.id)).where(Email.is_archived == False)
+    )).scalar_one() or 0
+
+    headers = {
+        "X-Important-Count": str(important_count),
+        "X-Total-Count": str(total_count),
+        "X-Unread-Count": str(unread_count),
+    }
+
+    if not emails:
+        return HTMLResponse(
+            '<div class="empty-list-msg" style="padding:24px;text-align:center;color:var(--ash);font-size:13px;">No emails found</div>',
+            headers=headers
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "partials/email_list_items.html",
+        {
+            "emails": emails,
+            "selected_email": emails[0],
+            "get_time_ago": get_time_ago,
+        },
+        headers=headers
     )
 
 
@@ -177,19 +234,32 @@ async def email_detail(
     if not email:
         return HTMLResponse("<p>Email not found</p>", status_code=404)
 
-    if not email.attachments:
-        from app.services.gmail_sync import sync_email_attachments
-        await sync_email_attachments(email, db)
-
     if not email.is_read:
-        await mark_email_read(email_id, db)
         email.is_read = True
+        await db.commit()
+
+        if email.account and email.gmail_id:
+            acc_token = email.account.access_token
+            ref_token = email.account.refresh_token
+            gmail_id = email.gmail_id
+
+            async def _bg_mark_read():
+                try:
+                    svc = get_gmail_service(acc_token, ref_token)
+                    await asyncio.to_thread(
+                        svc.users().messages().modify(
+                            userId="me",
+                            id=gmail_id,
+                            body={"removeLabelIds": ["UNREAD"]},
+                        ).execute
+                    )
+                except Exception as e:
+                    logger.debug("Background mark read failed: %s", e)
+
+            asyncio.create_task(_bg_mark_read())
 
     email_links = extract_links(email.body)
-
-    theme_result = await db.execute(select(Settings).where(Settings.key == "theme"))
-    theme_setting = theme_result.scalar_one_or_none()
-    theme = theme_setting.value if theme_setting else "dark"
+    theme = request.cookies.get("inboxzen_theme", "dark")
 
     return templates.TemplateResponse(
         request,
@@ -294,9 +364,6 @@ async def rescan(db: AsyncSession = Depends(get_db)):
     rescan_count = int(setting.value) if setting and setting.value else 50
     try:
         count = await run_triage_scan(db, rescan=True, limit=rescan_count)
-    except TriageRateLimit:
-        _scan_state["running"] = False
-        return _toast("Rate limited by LLM provider. Wait a minute and try again.", "error")
     except Exception as e:
         logger.error("Rescan failed: %s", e)
         _scan_state["running"] = False
@@ -316,14 +383,12 @@ async def cancel_triage():
 
 @router.get("/api/llm/status")
 async def llm_status_api(db: AsyncSession = Depends(get_db)):
-    provider = await get_provider(db)
     model = await get_selected_model(db)
-    status = await provider.check_status(model)
     return JSONResponse({
-        "online": status.online,
-        "loaded": status.loaded,
+        "online": True,
+        "loaded": is_laya_loaded(),
         "model": model,
-        "provider": provider.name,
+        "provider": "laya",
     })
 
 
@@ -332,20 +397,21 @@ async def scan_status_api():
     return JSONResponse(_scan_state)
 
 
-@router.post("/ollama/unload")
-async def ollama_unload(db: AsyncSession = Depends(get_db)):
-    provider = await get_provider(db)
-    if not provider.supports_unload():
-        return _toast("Unload is only available for Ollama", "error")
-    from app.services.llm_providers import OllamaProvider
-    op = OllamaProvider()
+@router.post("/laya/unload")
+async def llm_unload():
+    if await asyncio.to_thread(unload_laya):
+        await broadcast({"type": "llm_status", "status": "unloaded"})
+        return _toast("Laya unloaded from RAM.")
+    return _toast("Model already unloaded.", "info")
+
+
+@router.post("/laya/load")
+async def llm_load(db: AsyncSession = Depends(get_db)):
     model = await get_selected_model(db)
-    ok = await op.unload(model)
-    if ok:
-        from app.websocket_manager import broadcast
-        await broadcast({"type": "ollama_status", "status": "unloaded"})
-        return _toast("Model unloaded from GPU.")
-    return _toast("Failed to unload model.", "error")
+    if await asyncio.to_thread(load_laya, model):
+        await broadcast({"type": "llm_status", "status": "loaded"})
+        return _toast("Laya loaded into RAM ✓", "success")
+    return _toast("Failed to load Laya.", "error")
 
 
 
@@ -359,52 +425,57 @@ async def rescan_single(email_id: int, db: AsyncSession = Depends(get_db)):
         return _toast("Email not found", "error")
 
     try:
-        provider = await get_provider(db)
         model = await get_selected_model(db)
-        rules = load_custom_rules()
+        rules_res = await db.execute(select(Settings).where(Settings.key == "ai_triage_rules"))
+        rules_setting = rules_res.scalar_one_or_none()
+        instructions = rules_setting.value if rules_setting and rules_setting.value else ""
+
         email_dict = {
             "id": email.id,
             "subject": email.subject or "",
             "sender": email.sender or "",
             "body": re.sub(r'<[^>]+>', '', (email.body or ""))[:1500],
         }
-        triage_result = await scan_email(email_dict, provider, model, rules)
+        triage_result = await scan_email(email_dict, model=model, instructions=instructions)
     except Exception as e:
         return _toast(f"Rescan failed: {e}", "error")
 
-    email.summary = triage_result.summary or "No summary"
+    email.summary = triage_result.summary or ""
     email.relevance_score = max(0, min(100, triage_result.score))
     email.category = triage_result.category or "Uncategorized"
-    email.action_required = triage_result.action_required
     email.scan_model = model
     email.triaged_at = datetime.now(timezone.utc)
     await db.commit()
 
     score = email.relevance_score
     if score >= 90:
-        ring_color = '#4fd18b'
+        ring_color = 'var(--signal)'
     elif score >= 70:
-        ring_color = '#e8c34c'
+        ring_color = 'var(--amber)'
     else:
-        ring_color = '#9a9aa4'
+        ring_color = 'var(--ash)'
 
     ring_r = 35
     ring_circumf = round(2 * math.pi * ring_r, 4)
     ring_offset = round(ring_circumf * (1 - score / 100), 4)
 
+    cat_badge = f'<span class="badge" style="display:inline-block;padding:3px 10px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--bone);font-size:12px;font-weight:500;">{email.category}</span>' if email.category else ''
+
     html = f'''<div id="zen-card" class="zen-card">
         <div class="zen-left">
             <div class="zen-heading">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/></svg>
-                <span>Zen Summary</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.132 3.518 2.482 5.868 6 6-3.518.132-5.868 2.482-6 6-.132-3.518-2.482-5.868-6-6 3.518-.132 5.868-2.482 6-6z"/></svg>
+                <span>Triage Decision</span>
             </div>
-            <p class="zen-summary">{email.summary}</p>
-            <div class="zen-footer">rated by AI</div>
+            <div class="zen-badges" style="display:flex;align-items:center;gap:8px;margin:4px 0 6px 0;">
+                {cat_badge}
+            </div>
+            <div class="zen-footer">Decision by Laya · {email.scan_model or 'ModernBERT'}</div>
         </div>
         <div class="gauge-wrap">
             <div class="score-ring" style="width:84px;height:84px;">
                 <svg viewBox="0 0 84 84" width="84" height="84" style="transform:rotate(-90deg);">
-                    <circle cx="42" cy="42" r="{ring_r}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
+                    <circle cx="42" cy="42" r="{ring_r}" fill="none" stroke="var(--g-800)" stroke-width="6"/>
                     <circle cx="42" cy="42" r="{ring_r}" fill="none" stroke="{ring_color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="{ring_circumf}" stroke-dashoffset="{ring_offset}"/>
                 </svg>
                 <div class="score-ring-num" style="font-size:22px;color:{ring_color};">{score}</div>
@@ -428,7 +499,7 @@ def _is_safe_url(url: str) -> bool:
         addr_info = socket.getaddrinfo(parsed.hostname, None)
         for _, _, _, _, sockaddr in addr_info:
             ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
                 return False
         return True
     except Exception:

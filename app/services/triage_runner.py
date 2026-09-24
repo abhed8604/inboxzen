@@ -11,17 +11,13 @@ from sqlalchemy import select
 
 from app.models import Email, Settings
 from app.utils import get_selected_model
-from app.services.llm_triage import (
-    TriageResult, TriageUnavailable, TriageParseError, TriageRateLimit,
-    scan_email, scan_email_with_retry, load_custom_rules,
-)
-from app.services.llm_providers import get_provider, LLMProvider
+from app.services.llm_triage import TriageResult, scan_email, DEFAULT_RULES
 from app.websocket_manager import broadcast
 
 logger = logging.getLogger(__name__)
 
 MAX_SCAN_LIMIT = 500
-BATCH_SIZE = 10
+CONCURRENCY = 4
 
 _CANCEL = False
 _scan_state = {"running": False, "done": 0, "total": 0}
@@ -30,20 +26,6 @@ _scan_state = {"running": False, "done": 0, "total": 0}
 def request_cancel() -> None:
     global _CANCEL
     _CANCEL = True
-
-
-def reset_cancel() -> None:
-    global _CANCEL
-    _CANCEL = False
-
-
-async def _get_parallel_requests(db: AsyncSession) -> int:
-    result = await db.execute(select(Settings).where(Settings.key == "parallel_requests"))
-    setting = result.scalar_one_or_none()
-    try:
-        return int(setting.value) if setting and setting.value else 5
-    except (ValueError, TypeError):
-        return 5
 
 
 async def pick_emails(db: AsyncSession, *, rescan: bool, limit: int | None) -> list[Email]:
@@ -85,12 +67,10 @@ def mark_email(email: Email, result: TriageResult | None, model: str, error: str
         email.summary = result.summary
         email.relevance_score = result.score
         email.category = result.category
-        email.action_required = result.action_required
     elif error:
         email.summary = ""
         email.relevance_score = 0
         email.category = "Uncategorized"
-        email.action_required = False
 
     email.scan_model = model
     email.triaged_at = now
@@ -114,77 +94,24 @@ def _email_to_dict(email: Email) -> dict:
 async def _notify_progress(done: int, total: int, email_id: int, on_progress: Callable | None = None) -> None:
     _scan_state["done"] = done
     if done == 1:
-        await broadcast({"type": "ollama_status", "status": "loaded"})
+        await broadcast({"type": "llm_status", "status": "loaded"})
     await broadcast({"type": "scan_progress", "done": done, "total": total})
     await broadcast({"type": "email_triaged", "email_id": email_id})
     if on_progress:
         on_progress(done, total)
 
 
-async def _triage_sequential(
-    emails: list[Email],
-    provider: LLMProvider,
-    model: str,
-    rules: str,
-    db: AsyncSession,
-    total: int,
-    on_progress: Callable | None,
-    cancel_check: Callable | None,
-) -> int:
-    """Sequential triage: one email at a time, with retry and rate-limit backoff."""
-    global _CANCEL
-    done = 0
-    is_free = ":free" in model
-    delay = 15.0 if is_free else 0
-
-    for i in range(0, len(emails), BATCH_SIZE):
-        if _CANCEL or (cancel_check and cancel_check()):
-            break
-
-        chunk = emails[i:i + BATCH_SIZE]
-
-        for email in chunk:
-            if _CANCEL or (cancel_check and cancel_check()):
-                break
-
-            email_dict = _email_to_dict(email)
-            try:
-                result = await scan_email_with_retry(email_dict, provider, model, rules)
-                mark_email(email, result, model)
-                done += 1
-                await _notify_progress(done, total, email.id, on_progress)
-            except TriageRateLimit:
-                mark_email(email, None, model, error="Rate limited — try again later")
-                await db.commit()
-                raise
-            except TriageUnavailable:
-                mark_email(email, None, model, error="LLM unavailable")
-                await db.commit()
-                raise
-            except (TriageParseError, Exception) as e:
-                logger.error("Failed to triage email %d: %s", email.id, e)
-                mark_email(email, None, model, error=str(e))
-
-            if delay and done < total:
-                await asyncio.sleep(delay)
-
-        await db.commit()
-
-    return done
-
-
 async def _triage_parallel(
     emails: list[Email],
-    provider: LLMProvider,
     model: str,
-    rules: str,
     db: AsyncSession,
     total: int,
-    concurrency: int,
-    on_progress: Callable | None,
-    cancel_check: Callable | None,
+    concurrency: int = CONCURRENCY,
+    instructions: str = "",
+    on_progress: Callable | None = None,
+    cancel_check: Callable | None = None,
 ) -> int:
-    """Parallel triage for online providers (OpenAI/OpenRouter)."""
+    """Parallel triage across multiple emails."""
     global _CANCEL
     semaphore = asyncio.Semaphore(concurrency)
     done = 0
@@ -198,7 +125,7 @@ async def _triage_parallel(
         async with semaphore:
             email_dict = _email_to_dict(email)
             try:
-                result = await scan_email(email_dict, provider, model, rules)
+                result = await scan_email(email_dict, model=model, instructions=instructions)
                 async with lock:
                     mark_email(email, result, model)
                     await db.commit()
@@ -220,7 +147,7 @@ async def run_triage_scan(
     rescan: bool = False,
     limit: int | None = None,
     model: str | None = None,
-    provider: LLMProvider | None = None,
+    instructions: str | None = None,
     on_progress: Callable | None = None,
     cancel_check: Callable | None = None,
 ) -> int:
@@ -235,15 +162,17 @@ async def run_triage_scan(
     if not emails:
         return 0
 
-    if provider is None:
-        provider = await get_provider(db)
     if model is None:
         model = await get_selected_model(db)
 
     if not model or not model.strip():
         return -1
 
-    rules = load_custom_rules()
+    if instructions is None:
+        rules_res = await db.execute(select(Settings).where(Settings.key == "ai_triage_rules"))
+        rules_setting = rules_res.scalar_one_or_none()
+        instructions = rules_setting.value if rules_setting and rules_setting.value else DEFAULT_RULES
+
     total = len(emails)
 
     _scan_state["running"] = True
@@ -252,27 +181,18 @@ async def run_triage_scan(
     await broadcast({"type": "scan_start", "total": total, "mode": "rescan" if rescan else "scan"})
 
     try:
-        if provider.supports_parallel():
-            concurrency = 1 if ":free" in model else await _get_parallel_requests(db)
-            done = await _triage_parallel(
-                emails, provider, model, rules, db, total, concurrency,
-                on_progress, cancel_check,
-            )
-        else:
-            done = await _triage_sequential(
-                emails, provider, model, rules, db, total,
-                on_progress, cancel_check,
-            )
+        done = await _triage_parallel(
+            emails, model, db, total,
+            instructions=instructions,
+            on_progress=on_progress, cancel_check=cancel_check,
+        )
     finally:
         _scan_state["running"] = False
         _scan_state["done"] = 0
         _scan_state["total"] = 0
-        if provider and provider.supports_unload():
-            try:
-                await provider.unload(model)
-            except Exception as exc:
-                logger.warning("Failed auto-unload after scan: %s", exc)
         await broadcast({"type": "scan_end"})
+        import gc
+        gc.collect()
 
     if done == 0 and total > 0:
         return -1
